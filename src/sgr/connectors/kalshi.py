@@ -2,17 +2,17 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sgr.config import settings
+from sgr.config import Settings, settings
 from sgr.connectors.base import APIConnector
 from sgr.models import MarketSnapshot
 
 
 class KalshiConnector(APIConnector):
-    def __init__(self) -> None:
-        headers = {"Accept": "application/json"}
-        if settings.kalshi_api_key:
-            headers["KALSHI-ACCESS-KEY"] = settings.kalshi_api_key
-        super().__init__(base_url=settings.kalshi_api_base_url, headers=headers)
+    def __init__(self, configured_settings: Settings | None = None) -> None:
+        active_settings = configured_settings or settings
+        api_key, _ = active_settings.require_kalshi_read_only_credentials()
+        headers = {"Accept": "application/json", "KALSHI-ACCESS-KEY": api_key}
+        super().__init__(base_url=active_settings.kalshi_api_base_url, headers=headers)
 
     async def list_markets(self, limit: int = 25) -> list[MarketSnapshot]:
         payload = await self.get_json("markets", params={"limit": limit})

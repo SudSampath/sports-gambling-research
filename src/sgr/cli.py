@@ -10,6 +10,7 @@ from rich.table import Table
 
 from sgr.algorithms import MomentumStrategy, ValueStrategy
 from sgr.backtest import run_binary_backtest
+from sgr.config import ConfigurationError
 from sgr.connectors import KalshiConnector
 
 app = typer.Typer(help="Sports gambling research CLI")
@@ -90,7 +91,11 @@ def kalshi_markets(limit: int = 10) -> None:
             table.add_row(m.ticker, f"{m.yes_price:.2f}", f"{m.no_price:.2f}", f"{m.volume:,.0f}")
         console.print(table)
 
-    asyncio.run(_run())
+    try:
+        asyncio.run(_run())
+    except ConfigurationError as error:
+        console.print(f"[red]{error}[/red]")
+        raise typer.Exit(code=2) from error
 
 
 if __name__ == "__main__":

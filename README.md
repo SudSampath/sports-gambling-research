@@ -33,14 +33,15 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for contribution, test, security, and Claud
 
 ## Quickstart
 
-```bash
+```powershell
 cd sports-gambling-research
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
-Copy `.env.example` to `.env` and fill your API keys.
+Keep `.env` local: it is ignored by Git and must never be committed. The placeholder credentials in `.env.example` deliberately fail before an authenticated Kalshi request. Replace them only in your local `.env` with least-privilege, read-only credentials.
 
 Run demos:
 
