@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sports-gambling-research"
+version = "0.1.0"
+description = "Research pipeline combining Kalshi markets and sports APIs for model experimentation"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Your Name" }]
+dependencies = [
+  "httpx>=0.27.0",
+  "pydantic>=2.8.0",
+  "pydantic-settings>=2.3.0",
+  "pandas>=2.2.2",
+  "numpy>=2.0.0",
+  "typer>=0.12.3",
+  "rich>=13.7.1",
+  "python-dotenv>=1.0.1"
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.2.0"]
+
+[project.scripts]
+sgr = "sgr.cli:app"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
