@@ -3,6 +3,14 @@
 .env.*
 !.env.example
 
+# Private keys. Kalshi issues an RSA private key as a downloaded PEM file;
+# it signs every authenticated request and must never reach this public repo.
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+
 # Python environments and generated files
 .venv/
 __pycache__/

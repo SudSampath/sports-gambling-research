@@ -41,7 +41,18 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Keep `.env` local: it is ignored by Git and must never be committed. The placeholder credentials in `.env.example` deliberately fail before an authenticated Kalshi request. Replace them only in your local `.env` with least-privilege, read-only credentials.
+Keep `.env` local: it is ignored by Git and must never be committed. The placeholder values in `.env.example` deliberately fail before an authenticated request is attempted.
+
+### Kalshi credentials
+
+Kalshi signs every request rather than accepting a static token, so creating an API key gives you two things:
+
+1. an **API key ID** — set it as `KALSHI_API_KEY`
+2. an **RSA private key**, downloaded once as a `.pem` file — point `KALSHI_PRIVATE_KEY_PATH` at it
+
+The private key signs `timestamp + method + path` on each request. Store the `.pem` outside the repository, or rely on the `*.pem` rule in `.gitignore`; it is only downloadable at creation time, so losing it means issuing a new key. Set `KALSHI_PRIVATE_KEY_PEM` instead of the path when loading from a managed secret store, and `KALSHI_PRIVATE_KEY_PASSPHRASE` if you encrypted the key yourself.
+
+For research and paper trading, point `KALSHI_API_BASE_URL` at the demo environment (`https://demo-api.kalshi.co/trade-api/v2`) so no production account is reachable. The connector layer only implements `GET`, so there is no order-submission path.
 
 Run demos:
 
