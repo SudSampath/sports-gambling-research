@@ -1,0 +1,118 @@
+{
+  "contract": {
+    "changelog_checked_at": "2026-08-03T03:58:00Z",
+    "openapi_url": "https://docs.kalshi.com/openapi.yaml",
+    "required_fields": [
+      "yes_bid_dollars",
+      "yes_ask_dollars",
+      "no_bid_dollars",
+      "no_ask_dollars",
+      "yes_bid_size_fp",
+      "yes_ask_size_fp",
+      "volume_fp",
+      "open_interest_fp"
+    ],
+    "required_paths": [
+      "/series/{series_ticker}",
+      "/events",
+      "/markets",
+      "/markets/{ticker}/orderbook",
+      "/markets/orderbooks",
+      "/historical/cutoff",
+      "/historical/markets/{ticker}"
+    ]
+  },
+  "series": {
+    "series": {
+      "ticker": "KXNFLGAME",
+      "title": "NFL game winner",
+      "category": "Sports",
+      "fee_type": "quadratic"
+    }
+  },
+  "events_page_1": {
+    "events": [{"event_ticker": "KXNFLGAME-26SEP10DALPHI", "title": "Dallas at Philadelphia"}],
+    "cursor": "event-page-2"
+  },
+  "events_page_2": {
+    "events": [{"event_ticker": "KXNFLGAME-26SEP13KCLAC", "title": "Kansas City at LA Chargers"}],
+    "cursor": ""
+  },
+  "markets_page_1": {
+    "markets": [
+      {
+        "ticker": "KXNFLGAME-26SEP10DALPHI-DAL",
+        "event_ticker": "KXNFLGAME-26SEP10DALPHI",
+        "primary_participant_key": "DAL",
+        "yes_sub_title": "Dallas",
+        "title": "Will Dallas win?",
+        "status": "open",
+        "rules_primary": "Resolves Yes if Dallas wins the named NFL game.",
+        "occurrence_datetime": "2026-09-11T00:20:00Z",
+        "close_time": "2026-09-11T03:30:00Z",
+        "yes_bid_dollars": "0.4600",
+        "yes_ask_dollars": "0.4800",
+        "no_bid_dollars": "0.5200",
+        "no_ask_dollars": "0.5400",
+        "yes_bid_size_fp": "125.00",
+        "yes_ask_size_fp": "80.00",
+        "volume_fp": "1520.50",
+        "open_interest_fp": "910.25"
+      }
+    ],
+    "cursor": "market-page-2"
+  },
+  "markets_page_2": {
+    "markets": [
+      {
+        "ticker": "KXNFLGAME-26SEP13KCLAC-KC",
+        "event_ticker": "KXNFLGAME-26SEP13KCLAC",
+        "primary_participant_key": "KC",
+        "yes_sub_title": "Kansas City",
+        "title": "Will Kansas City win?",
+        "status": "open",
+        "rules_primary": "Resolves Yes if Kansas City wins the named NFL game.",
+        "occurrence_datetime": "2026-09-13T20:25:00Z",
+        "close_time": "2026-09-13T23:30:00Z",
+        "yes_bid_dollars": "0.6100",
+        "yes_ask_dollars": "0.6300",
+        "no_bid_dollars": "0.3700",
+        "no_ask_dollars": "0.3900",
+        "yes_bid_size_fp": "40.00",
+        "yes_ask_size_fp": "32.50",
+        "volume_fp": "875.00",
+        "open_interest_fp": "455.50"
+      }
+    ],
+    "cursor": null
+  },
+  "orderbook": {
+    "orderbook_fp": {
+      "yes_dollars": [["0.4400", "20.00"], ["0.4600", "125.00"]],
+      "no_dollars": [["0.5000", "10.00"], ["0.5200", "80.00"]]
+    }
+  },
+  "batch_orderbooks": {
+    "orderbooks": [
+      {
+        "ticker": "KXNFLGAME-26SEP10DALPHI-DAL",
+        "orderbook_fp": {
+          "yes_dollars": [["0.4600", "125.00"]],
+          "no_dollars": [["0.5200", "80.00"]]
+        }
+      }
+    ]
+  },
+  "historical_cutoff": {
+    "market_settled_ts": "2026-05-01T00:00:00Z",
+    "trades_created_ts": "2026-05-01T00:00:00Z",
+    "orders_updated_ts": "2026-05-01T00:00:00Z"
+  },
+  "historical_market": {
+    "market": {
+      "ticker": "KXNFLGAME-24FEB11SFKC-SF",
+      "status": "settled",
+      "result": "no"
+    }
+  }
+}

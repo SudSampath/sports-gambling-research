@@ -21,7 +21,8 @@ The current implementation PRD (draft) is at [docs/PRD.md](docs/PRD.md).
 
 ## What is included
 
-- Kalshi connector for market snapshots.
+- Unauthenticated, read-only Kalshi connector for NFL series, events, markets,
+  executable orderbooks, and historical market snapshots.
 - Sports API connectors (The Odds API + SportsData starter).
 - Strategy stubs:
   - `ValueStrategy`
@@ -43,18 +44,19 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Keep `.env` local: it is ignored by Git and must never be committed. The placeholder values in `.env.example` deliberately fail before an authenticated request is attempted.
+Keep `.env` local: it is ignored by Git and must never be committed. Kalshi's
+public REST market-data endpoints require no credentials, and the Phase 1
+connector never reads the reserved Kalshi credential placeholders. Other
+providers still require their documented local keys.
 
-### Kalshi credentials
+See [docs/kalshi-market-data.md](docs/kalshi-market-data.md) for the public API
+contract, replay storage, and quote rejection rules.
 
-Kalshi signs every request rather than accepting a static token, so creating an API key gives you two things:
+### Kalshi credentials (reserved, not used in Phase 1)
 
-1. an **API key ID** — set it as `KALSHI_API_KEY`
-2. an **RSA private key**, downloaded once as a `.pem` file — point `KALSHI_PRIVATE_KEY_PATH` at it
+Kalshi signs authenticated requests rather than accepting a static token, so creating an API key gives you an **API key ID** (`KALSHI_API_KEY`) and an **RSA private key** downloaded once as a `.pem` file (`KALSHI_PRIVATE_KEY_PATH`). The signing implementation lives in `sgr.connectors.kalshi_auth` and is retained for a future authenticated milestone; nothing on the Phase 1 read-only path calls it.
 
-The private key signs `timestamp + method + path` on each request. Store the `.pem` outside the repository at an absolute path; `.gitignore` is only a backstop, never a storage strategy. It is only downloadable at creation time, so losing it means issuing a new key. Set `KALSHI_PRIVATE_KEY_PEM` instead of the path when loading from a managed secret store, and `KALSHI_PRIVATE_KEY_PASSPHRASE` if you encrypted the key yourself.
-
-For research and paper trading, point `KALSHI_API_BASE_URL` at the demo environment (`https://demo-api.kalshi.co/trade-api/v2`) so no production account is reachable. The connector layer only implements `GET`, so there is no order-submission path.
+If that milestone is enabled, store the `.pem` outside the repository at an absolute path — `.gitignore` is a backstop, never a storage strategy — and point `KALSHI_API_BASE_URL` at the demo environment (`https://demo-api.kalshi.co/trade-api/v2`) so no production account is reachable. Use `KALSHI_PRIVATE_KEY_PEM` instead of the path when loading from a managed secret store, and `KALSHI_PRIVATE_KEY_PASSPHRASE` if the key is encrypted.
 
 Run demos:
 
@@ -73,6 +75,7 @@ python -m sgr.cli kalshi-markets --limit 10
 Run tests:
 
 ```bash
+pytest -m bdd
 pytest
 ```
 

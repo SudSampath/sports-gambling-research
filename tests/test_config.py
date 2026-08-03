@@ -133,8 +133,23 @@ def test_plaintext_secret_is_never_echoed_in_errors():
     assert _LEAK_SENTINEL not in repr(configured_settings)
 
 
-def test_connector_fails_before_any_request_without_credentials():
+def test_public_kalshi_connector_does_not_copy_credentials_into_headers():
+    # Credentials present but reserved: the Phase 1 read-only path must ignore them.
+    configured_settings = Settings(
+        _env_file=None,
+        kalshi_api_key="local-read-only-key",
+        kalshi_private_key_pem=_LEAK_SENTINEL,
+    )
+
+    connector = KalshiConnector(configured_settings=configured_settings)
+
+    assert not hasattr(connector, "headers")
+    assert _LEAK_SENTINEL not in repr(connector)
+
+
+def test_public_kalshi_connector_allows_missing_credentials():
     configured_settings = Settings(_env_file=None)
 
-    with pytest.raises(ConfigurationError):
-        KalshiConnector(configured_settings=configured_settings)
+    connector = KalshiConnector(configured_settings=configured_settings)
+
+    assert connector.base_url == "https://external-api.kalshi.com/trade-api/v2"

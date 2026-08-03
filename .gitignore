@@ -19,6 +19,9 @@ __pycache__/
 .coverage
 htmlcov/
 
+# Reproducible provider snapshots are generated locally and may be large.
+data/
+
 # Build and editor artifacts
 build/
 dist/

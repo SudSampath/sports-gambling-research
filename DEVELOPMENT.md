@@ -21,6 +21,7 @@
 ## Quality gates
 
 ```powershell
+python -m pytest -m bdd
 python -m pytest
 python -m sgr.cli --help
 git diff --check

@@ -28,12 +28,14 @@ def _require_secret(value: SecretStr, provider: str, environment_variable: str) 
 
 
 class Settings(BaseSettings):
-    # Demo is the safe default. A production endpoint requires an explicit local
-    # override after the user has intentionally chosen to use one.
-    kalshi_api_base_url: str = "https://demo-api.kalshi.co/trade-api/v2"
+    # Phase 1 reads public market data only, which needs no credentials. The
+    # demo trading environment (https://demo-api.kalshi.co/trade-api/v2) is the
+    # safe default if an authenticated milestone is ever enabled.
+    kalshi_api_base_url: str = "https://external-api.kalshi.com/trade-api/v2"
 
-    # Kalshi issues an API key ID plus an RSA private key. The key ID is not
-    # secret, but the private key is: it signs every authenticated request.
+    # Unused in Phase 1 and read by nothing on the public path. Retained for a
+    # future authenticated milestone: Kalshi issues an API key ID plus an RSA
+    # private key, and the key ID is not secret but the private key is.
     kalshi_api_key: SecretStr = Field(default_factory=lambda: SecretStr(""), repr=False)
     kalshi_private_key_path: Path | None = None
     kalshi_private_key_pem: SecretStr = Field(default_factory=lambda: SecretStr(""), repr=False)
