@@ -17,6 +17,8 @@ A public, research-only Python project for evaluating NFL event-market signals. 
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for contribution, test, security, and Claude Code review expectations.
 
+The current implementation PRD (draft) is at [docs/PRD.md](docs/PRD.md).
+
 ## What is included
 
 - Kalshi connector for market snapshots.
