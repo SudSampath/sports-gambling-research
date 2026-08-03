@@ -16,7 +16,8 @@ A public, research-only Python project for evaluating NFL event-market signals. 
 - Claims of guaranteed profit or betting advice.
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for contribution, test, security, and Claude Code review expectations.
-The implementation PRD is published at [docs/PRD.md](docs/PRD.md).
+
+The current implementation PRD (draft) is at [docs/PRD.md](docs/PRD.md).
 
 ## What is included
 

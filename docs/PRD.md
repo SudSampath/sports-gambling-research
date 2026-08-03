@@ -1,4 +1,6 @@
-> Source of truth: [Linear PRD](https://linear.app/sudsampath/document/prd-nfl-market-signals-82a747cfd599)
+> **Research document.** The outputs described here are research signals — not financial, betting, or legal advice — and nothing in this document is a claim or prediction of profit. See [Responsible use](#responsible-use).
+>
+> Source of truth: internal Linear PRD (SUD-26), which is not publicly accessible.
 >
 > This repository copy is the version published on 2026-07-29 for implementation and review. Update the Linear document first, then synchronize this file in a dedicated documentation pull request.
 
@@ -40,7 +42,9 @@ This gap makes it easy to confuse hindsight with predictive performance, compare
 
 For NFL games, a calibrated Pythagorean-expectation model based on points scored and allowed—combined with opponent, recency, and availability adjustments—will produce a well-calibrated pre-game win probability. When that probability materially differs from the comparable Kalshi contract price after fees, spread, liquidity, and uncertainty haircuts, the system can surface a paper-trade recommendation with positive expected value more consistently than a naive market-following baseline.
 
-# Why this works
+# Why this might work
+
+Each row states the reason a component is expected to contribute. None of it is established for this problem yet — the risk table records "Pythagorean expectation has no durable market edge" as a live possibility, and the success criteria accept a documented falsification as a valid outcome of the spike.
 
 | Component | Role | Rationale |
 | -- | -- | -- |
@@ -99,6 +103,8 @@ For NFL games, a calibrated Pythagorean-expectation model based on points scored
 | Edge | Model probability minus conservative executable market probability | Expected value after all known costs |
 | Sizing | Fixed paper stake only in Phase 1 | No live sizing until separately approved |
 
+Pythagorean expectation originates with Bill James's work on baseball run differential. The football adaptation uses a higher fitted exponent than baseball: Football Outsiders publishes 2.37 for the NFL ([overview and sport-specific exponents](<https://en.wikipedia.org/wiki/Pythagorean_expectation>)). The spike treats 2.37 as the published starting value to compare against rather than as an assumption, and refits `x` under the walk-forward validation above; a refit that fails to beat 2.37 is itself a reportable result.
+
 # Validated constraints
 
 > RULE: The first release must create paper-trade recommendations only. It must not submit, modify, cancel, or settle real-money orders.
@@ -116,6 +122,16 @@ For NFL games, a calibrated Pythagorean-expectation model based on points scored
 > RULE: The system must gate market access by jurisdiction, platform terms, legal review, age/eligibility requirements, and user authorization before any future real-money capability is considered.
 
 > RULE: Public documentation must clearly state that outputs are research signals, not financial, betting, or legal advice.
+
+# Responsible use
+
+This project studies how event-contract prices relate to a transparent model of team strength. It does not provide betting advice, does not encourage wagering, and makes no claim that any method described here is profitable. The central hypothesis may simply be false, and the spike is designed to be able to say so.
+
+Sports wagering carries a risk of financial harm and of gambling disorder, and that risk is not reduced by having a model. Anyone extending this work toward real-money activity should treat the approval gates in "Deferred items and path to production" as a floor rather than a formality.
+
+If gambling is causing harm to you or someone you know, the US National Problem Gambling Helpline is reachable at **1-800-MY-RESET** (1-800-697-3738), by text at 1-800-522-4700, and at [ncpgambling.org](<https://www.ncpgambling.org/help-treatment/>). Outside the US, consult the equivalent national service.
+
+> RULE: No interface, report, notebook, or README produced by this project may present its outputs as advice, tips, picks, or an expectation of profit.
 
 # Risks
 
@@ -135,7 +151,6 @@ For NFL games, a calibrated Pythagorean-expectation model based on points scored
 
 | Question | Why it matters | Proposed next step |
 | -- | -- | -- |
-| Does “create wages” mean “create wagers,” and is the goal research, paper trading, or actual order submission? | Determines legal, compliance, and system scope | Confirm before any live-trading design |
 | Which Kalshi markets are in scope: winner-only, spreads, totals, season futures, or others? | Settlement semantics and model target differ | Start with NFL game-winner contracts only |
 | What jurisdiction and user eligibility constraints apply? | May block future market interaction entirely | Obtain legal/compliance guidance before Phase 2 |
 | Which historical ESPN fields and retention limits are available? | Determines model richness and backtest reproducibility | Run data-availability spike |
@@ -196,6 +211,8 @@ For NFL games, a calibrated Pythagorean-expectation model based on points scored
 
 The initial ESPN adapter will use the endpoint documentation in [pseudo-r/Public-ESPN-API](<https://github.com/pseudo-r/Public-ESPN-API>) as a development reference. It documents a public NFL scoreboard endpoint and related schedules, teams, standings, summaries, play-by-play, and competitor statistics. The repository explicitly describes these as undocumented ESPN interfaces, warns that they may change without notice, and recommends caching, respectful request rates, and error handling. [Source](<https://github.com/pseudo-r/Public-ESPN-API>)
 
+That repository publishes no license, so default copyright applies and no reuse of its contents is granted. It is therefore treated as a pointer to endpoints that this project verifies independently against live responses — not as material to copy. Schemas are derived from observed payloads and recorded in our own contract fixtures.
+
 | Adapter concern | Spike decision |
 | -- | -- |
 | Initial endpoint | Use the documented NFL scoreboard endpoint for schedule/event discovery; obtain game details through the documented event-summary path only as needed |
@@ -204,9 +221,10 @@ The initial ESPN adapter will use the endpoint documentation in [pseudo-r/Public
 | Schema changes | Store raw payloads, validate normalized schemas, maintain contract fixtures, and emit freshness/schema-drift alerts |
 | Historical backtest | Validate date-range coverage and point-in-time availability before declaring ESPN fit for historical reconstruction |
 | Source isolation | Put all calls behind an `EspnProvider` interface so a licensed/official substitute can replace it without affecting models |
-| Terms and attribution | Review current ESPN terms before deployment; document provenance and avoid representing ESPN data as independently verified |
+| Terms and attribution | Review current ESPN terms before the first automated request, not before deployment; document provenance and avoid representing ESPN data as independently verified |
+| Reference material | `pseudo-r/Public-ESPN-API` is unlicensed; use it to locate endpoints only, and derive schemas from observed payloads |
 
-> RULE: ESPN-derived data may be used for the research spike only through a read-only, cache-first adapter. Any sustained production use must pass a source licensing, terms, reliability, and retention review.
+> RULE: ESPN-derived data may be used for the research spike only through a read-only, cache-first adapter, and only after a review of ESPN's current terms. The terms review gates the first automated request, because the spike incurs the same access exposure as production. Any sustained production use must additionally pass a source licensing, reliability, and retention review.
 
 > RULE: ESPN-provided odds, win probabilities, predictors, or power-index fields must not be used as model features in the Pythagorean baseline. They may be stored separately for benchmark analysis only, preventing target or vendor-model leakage.
 
@@ -214,7 +232,16 @@ The initial ESPN adapter will use the endpoint documentation in [pseudo-r/Public
 
 ## What the research supports
 
-Professional practice is best represented as a repeatable pricing and evaluation process, not as a set of narrative rules. Industry descriptions emphasize independent model projections, player/injury information, and market prices; published work finds that information content typically increases as NFL markets approach kickoff and that apparent biases must be evaluated after transaction costs. [PFF: timing, player data, injuries, and market information](<https://www.pff.com/news/bet-why-betting-early-critical-beating-nfl-markets>) · [Intra-week NFL market study](<https://www.sciencedirect.com/science/article/abs/pii/S0927539813000509>) · [NFL market-efficiency study](<https://doi.org/10.1111/j.1540-6261.1997.tb01129.x>)
+Professional practice is best represented as a repeatable pricing and evaluation process, not as a set of narrative rules. Industry descriptions emphasize independent model projections, player/injury information, and market prices; published work finds that information content typically increases as NFL markets approach kickoff and that apparent biases must be evaluated after transaction costs.
+
+**Peer-reviewed**
+
+* Gray, P. K., & Gray, S. F. (1997). Testing market efficiency: evidence from the NFL sports betting market. *The Journal of Finance*, 52(4). [doi:10.1111/j.1540-6261.1997.tb01129.x](<https://doi.org/10.1111/j.1540-6261.1997.tb01129.x>)
+* Miller, T. W., & Rapach, D. E. (2013). An intra-week efficiency analysis of bookie-quoted NFL betting lines in NYC. *Journal of Empirical Finance*, 24. [doi:10.1016/j.jempfin.2013.07.002](<https://doi.org/10.1016/j.jempfin.2013.07.002>)
+
+**Industry commentary** — trade publications, not peer-reviewed; treated as descriptions of practice rather than evidence.
+
+* Pro Football Focus. *Why betting early is critical to beating NFL markets.* [pff.com](<https://www.pff.com/news/bet-why-betting-early-critical-beating-nfl-markets>)
 
 ## Handicapping framework for the NFL spike
 
@@ -237,8 +264,8 @@ Professional practice is best represented as a repeatable pricing and evaluation
 | Opening-to-closing market movement | Published NFL research indicates information content can rise through the betting week. | Compare model and market snapshots at fixed offsets; prohibit use of post-decision movement as a feature. |
 | Injury/inactive news | Practitioners explicitly incorporate player data and injury information. | Prove point-in-time source coverage, then test incremental calibration and CLV value by position group. |
 | Rest, travel, and venue | Plausible physical/contextual mechanisms. | Multi-season, season-held-out ablation with interaction controls. |
-| Weather | Published NFL work has examined weather-related price efficiency. | Use timestamped observed/forecast data and test only prespecified outdoor-game segments. [Weather-market study](<https://www.sciencedirect.com/science/article/abs/pii/S0148619506001019>) |
-| Public bet share / reverse line movement | Industry tools present it as a proxy for sharp action, but it is venue-specific and incomplete. | Treat as exploratory only; require provenance, coverage, and a pre-registered out-of-sample result. [Industry methodology](<https://www.actionnetwork.com/how-to-bet-on-sports/general/sports-betting-data-how-to-win-action-network/>) |
+| Weather | Published NFL work has examined weather-related price efficiency. | Use timestamped observed/forecast data and test only prespecified outdoor-game segments. Borghesi (2007), *Journal of Economics and Business* 59(4), [doi:10.1016/j.jeconbus.2006.09.001](<https://doi.org/10.1016/j.jeconbus.2006.09.001>) |
+| Public bet share / reverse line movement | Industry tools present it as a proxy for sharp action, but it is venue-specific and incomplete. | Treat as exploratory only; require provenance, coverage, and a pre-registered out-of-sample result. Industry commentary, not peer-reviewed: [Action Network methodology](<https://www.actionnetwork.com/how-to-bet-on-sports/general/sports-betting-data-how-to-win-action-network/>) |
 
 ## Revised data requirements
 
