@@ -17,6 +17,12 @@ A public, research-only Python project for evaluating NFL event-market signals. 
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for contribution, test, security, and Claude Code review expectations.
 
+## Claude Code pull-request reviews
+
+After the repository secret `ANTHROPIC_API_KEY` has been added in GitHub, the repository owner can request a review by commenting `@claude review` on a pull request. The workflow accepts only owner comments and grants Claude comment-only review tools; it cannot commit, push, merge, or access provider credentials.
+
+To configure the secret, open the repository's **Settings → Secrets and variables → Actions**, add a new repository secret named `ANTHROPIC_API_KEY`, and paste the key there. Do not add the key to `.env`, source control, Linear, or chat.
+
 ## What is included
 
 - Kalshi connector for market snapshots.
