@@ -32,16 +32,39 @@ def test_api_key_without_private_key_explains_both_options():
     assert "KALSHI_PRIVATE_KEY_PEM" in str(error.value)
 
 
-def test_placeholder_private_key_path_is_treated_as_unset():
+def test_placeholder_private_key_path_is_rejected_even_when_the_file_exists(tmp_path, monkeypatch):
+    placeholder_file = tmp_path / "path" / "to" / "kalshi-key.pem"
+    placeholder_file.parent.mkdir(parents=True)
+    placeholder_file.write_bytes(b"must-not-be-read")
+    monkeypatch.chdir(tmp_path)
     configured_settings = Settings(
         _env_file=None,
         kalshi_api_key="key-id-1",
         kalshi_private_key_path="path/to/kalshi-key.pem",
     )
 
-    # The value shipped in .env.example must not be mistaken for a real path.
-    with pytest.raises(ConfigurationError, match="Kalshi private key not found"):
+    # The path shipped in .env.example must never be mistaken for a real key.
+    with pytest.raises(ConfigurationError, match="placeholder values"):
         configured_settings.require_kalshi_key_material()
+
+
+def test_relative_private_key_path_is_rejected(tmp_path, monkeypatch):
+    relative_file = tmp_path / "keys" / "kalshi-key.pem"
+    relative_file.parent.mkdir()
+    relative_file.write_bytes(b"must-not-be-read")
+    monkeypatch.chdir(tmp_path)
+    configured_settings = Settings(
+        _env_file=None,
+        kalshi_api_key="key-id-1",
+        kalshi_private_key_path="keys/kalshi-key.pem",
+    )
+
+    with pytest.raises(ConfigurationError, match="absolute path"):
+        configured_settings.require_kalshi_key_material()
+
+
+def test_kalshi_uses_demo_environment_by_default():
+    assert Settings(_env_file=None).kalshi_api_base_url == "https://demo-api.kalshi.co/trade-api/v2"
 
 
 def test_missing_private_key_file_reports_the_path(tmp_path):

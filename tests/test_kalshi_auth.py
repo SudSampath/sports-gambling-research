@@ -4,11 +4,12 @@ import asyncio
 import base64
 
 import pytest
+import httpx
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa
 
 from sgr.config import Settings
-from sgr.connectors.base import APIConnector
+from sgr.connectors.base import APIConnector, APIRequestError
 from sgr.connectors.kalshi import KalshiConnector
 from sgr.connectors.kalshi_auth import KalshiSignatureError, KalshiSigner
 
@@ -168,3 +169,29 @@ def test_connector_signs_outbound_request(monkeypatch):
     headers = _FakeClient.last_call["headers"]
     assert headers["Accept"] == "application/json"
     _verify(headers, "GET", MARKETS_PATH)
+
+
+class _FailingResponse:
+    def raise_for_status(self) -> None:
+        request = httpx.Request(
+            "GET", "https://api.the-odds-api.com/v4/sports/nfl/odds?apiKey=query-secret"
+        )
+        response = httpx.Response(401, request=request)
+        raise httpx.HTTPStatusError("credential-bearing URL", request=request, response=response)
+
+
+class _FailingClient(_FakeClient):
+    async def get(self, url: str, params: dict | None = None, headers: dict | None = None):
+        return _FailingResponse()
+
+
+def test_http_status_error_redacts_query_credentials(monkeypatch):
+    monkeypatch.setattr("sgr.connectors.base.httpx.AsyncClient", _FailingClient)
+    connector = APIConnector("https://api.the-odds-api.com/v4")
+
+    with pytest.raises(APIRequestError) as error:
+        asyncio.run(connector.get_json("sports/nfl/odds", params={"apiKey": "query-secret"}))
+
+    assert "query-secret" not in str(error.value)
+    assert "query-secret" not in repr(error.value)
+    assert error.value.__cause__ is None

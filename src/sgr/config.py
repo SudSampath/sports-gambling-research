@@ -13,8 +13,9 @@ _PLACEHOLDER_VALUES = frozenset(
 )
 
 
-def _is_placeholder(value: SecretStr) -> bool:
-    return value.get_secret_value().strip().casefold() in _PLACEHOLDER_VALUES
+def _is_placeholder(value: SecretStr | str) -> bool:
+    raw_value = value.get_secret_value() if isinstance(value, SecretStr) else value
+    return raw_value.strip().replace("\\", "/").casefold() in _PLACEHOLDER_VALUES
 
 
 def _require_secret(value: SecretStr, provider: str, environment_variable: str) -> str:
@@ -27,7 +28,9 @@ def _require_secret(value: SecretStr, provider: str, environment_variable: str) 
 
 
 class Settings(BaseSettings):
-    kalshi_api_base_url: str = "https://api.elections.kalshi.com/trade-api/v2"
+    # Demo is the safe default. A production endpoint requires an explicit local
+    # override after the user has intentionally chosen to use one.
+    kalshi_api_base_url: str = "https://demo-api.kalshi.co/trade-api/v2"
 
     # Kalshi issues an API key ID plus an RSA private key. The key ID is not
     # secret, but the private key is: it signs every authenticated request.
@@ -62,6 +65,15 @@ class Settings(BaseSettings):
             pem = self.kalshi_private_key_pem.get_secret_value().encode()
         elif self.kalshi_private_key_path is not None:
             key_path = self.kalshi_private_key_path.expanduser()
+            if _is_placeholder(str(key_path)):
+                raise ConfigurationError(
+                    "Kalshi private-key paths must not use placeholder values. Set "
+                    "KALSHI_PRIVATE_KEY_PATH to an absolute path outside this repository."
+                )
+            if not key_path.is_absolute():
+                raise ConfigurationError(
+                    "KALSHI_PRIVATE_KEY_PATH must be an absolute path outside this repository."
+                )
             if not key_path.is_file():
                 raise ConfigurationError(
                     f"Kalshi private key not found at {key_path}. Point "

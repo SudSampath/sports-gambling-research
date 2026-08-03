@@ -6,6 +6,10 @@ from urllib.parse import urlsplit
 import httpx
 
 
+class APIRequestError(RuntimeError):
+    """A provider failure that intentionally excludes request credentials."""
+
+
 class APIConnector:
     def __init__(self, base_url: str, headers: dict[str, str] | None = None, timeout: float = 15.0):
         self.base_url = base_url.rstrip("/")
@@ -29,5 +33,14 @@ class APIConnector:
         headers = self.request_headers("GET", urlsplit(url).path)
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.get(url, params=params, headers=headers)
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as error:
+                # httpx includes the fully rendered URL in this exception. Some
+                # providers require credentials in query parameters, so never
+                # propagate it to a CLI, log, or traceback.
+                raise APIRequestError(
+                    f"GET {urlsplit(url).path} failed with HTTP status "
+                    f"{error.response.status_code}."
+                ) from None
             return response.json()

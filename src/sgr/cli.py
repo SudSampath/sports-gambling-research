@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
@@ -15,6 +16,15 @@ from sgr.connectors import KalshiConnector
 
 app = typer.Typer(help="Sports gambling research CLI")
 console = Console()
+
+
+def _run_configured_command(operation: Callable[[], Awaitable[None]]) -> None:
+    """Run a credentialed command without exposing configuration tracebacks."""
+    try:
+        asyncio.run(operation())
+    except ConfigurationError as error:
+        console.print(f"[red]{error}[/red]")
+        raise typer.Exit(code=2) from None
 
 
 @app.command()
@@ -91,11 +101,7 @@ def kalshi_markets(limit: int = 10) -> None:
             table.add_row(m.ticker, f"{m.yes_price:.2f}", f"{m.no_price:.2f}", f"{m.volume:,.0f}")
         console.print(table)
 
-    try:
-        asyncio.run(_run())
-    except ConfigurationError as error:
-        console.print(f"[red]{error}[/red]")
-        raise typer.Exit(code=2) from error
+    _run_configured_command(_run)
 
 
 if __name__ == "__main__":
