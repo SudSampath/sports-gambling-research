@@ -47,7 +47,7 @@ class NFLGame(BaseModel):
     event_id: str
     season_year: int = Field(ge=2000)
     season_type: NFLSeasonType
-    week: int = Field(ge=1)
+    week: int = Field(ge=1, le=25)
     kickoff: datetime
     status: str
     completed: bool

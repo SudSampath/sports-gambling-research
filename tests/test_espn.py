@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import ssl
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -23,6 +24,14 @@ SOURCE_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scorebo
 
 def _fixture_payload() -> dict:
     return json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+
+
+def test_connector_uses_verified_system_tls_context(tmp_path):
+    connector = EspnConnector(cache_dir=tmp_path)
+
+    assert isinstance(connector.verify, ssl.SSLContext)
+    assert connector.verify.check_hostname is True
+    assert connector.verify.verify_mode == ssl.CERT_REQUIRED
 
 
 def test_normalizes_completed_game_and_retains_snapshot_provenance(tmp_path):
@@ -50,6 +59,23 @@ def test_normalizes_completed_game_and_retains_snapshot_provenance(tmp_path):
     assert game.raw_snapshot_path == snapshot["snapshot_path"]
     assert len(game.raw_snapshot_sha256) == 64
     assert game.normalization_version == "espn-scoreboard-v1"
+    stored = json.loads(Path(game.raw_snapshot_path).read_text(encoding="utf-8"))
+    assert stored["normalization_version"] == "espn-scoreboard-v1"
+
+
+def test_snapshot_cannot_be_overwritten_at_same_retrieval_time(tmp_path):
+    connector = EspnConnector(cache_dir=tmp_path)
+    retrieved_at = datetime(2025, 9, 7, 18, tzinfo=timezone.utc)
+    original = connector._write_snapshot(GAME_DATE, _fixture_payload(), SOURCE_URL, retrieved_at)
+    path = Path(original["snapshot_path"])
+    original_bytes = path.read_bytes()
+    changed = _fixture_payload()
+    changed["events"][0]["id"] = "conflict"
+
+    with pytest.raises(EspnSchemaError, match="Refusing to overwrite immutable ESPN snapshot"):
+        connector._write_snapshot(GAME_DATE, changed, SOURCE_URL, retrieved_at)
+
+    assert path.read_bytes() == original_bytes
 
 
 def test_reuses_cached_snapshot_without_a_live_request(tmp_path, monkeypatch):

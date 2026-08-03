@@ -134,6 +134,7 @@ def raw_response_provenance(espn_context):
     assert game.raw_snapshot_sha256 == snapshot["payload_sha256"]
     assert game.raw_snapshot_sha256 == hashlib.sha256(canonical_payload.encode()).hexdigest()
     assert game.normalization_version == EspnConnector.NORMALIZATION_VERSION
+    assert snapshot["normalization_version"] == EspnConnector.NORMALIZATION_VERSION
 
 
 @then("provider odds and predictor fields are absent from canonical games")
@@ -307,6 +308,59 @@ def typed_schema_error(espn_context):
     assert isinstance(espn_context["error"], EspnSchemaError)
 
 
+@given("a completed ESPN snapshot at a fixed retrieval timestamp")
+def fixed_timestamp_snapshot(espn_context):
+    espn_context["retrieved_at"] = datetime(2025, 9, 7, 18, tzinfo=timezone.utc)
+    snapshot = espn_context["connector"]._write_snapshot(
+        COMPLETED_DATE,
+        _payload(),
+        COMPLETED_SOURCE_URL,
+        espn_context["retrieved_at"],
+    )
+    espn_context["snapshot_path"] = Path(snapshot["snapshot_path"])
+    espn_context["original_bytes"] = espn_context["snapshot_path"].read_bytes()
+
+
+@when("a different payload is stored at the same retrieval timestamp")
+def conflicting_snapshot_write(espn_context):
+    changed = _payload()
+    changed["events"][0]["id"] = "conflicting-event"
+    try:
+        espn_context["connector"]._write_snapshot(
+            COMPLETED_DATE,
+            changed,
+            COMPLETED_SOURCE_URL,
+            espn_context["retrieved_at"],
+        )
+    except Exception as error:  # asserted by the following BDD step
+        espn_context["error"] = error
+
+
+@then("a typed immutable snapshot error is returned")
+def immutable_snapshot_error(espn_context):
+    assert isinstance(espn_context["error"], EspnSchemaError)
+    assert "Refusing to overwrite immutable ESPN snapshot" in str(espn_context["error"])
+
+
+@then("the original snapshot remains valid")
+def original_snapshot_remains_valid(espn_context):
+    assert espn_context["snapshot_path"].read_bytes() == espn_context["original_bytes"]
+    games = asyncio.run(espn_context["connector"].games_for_date(COMPLETED_DATE))
+    assert [game.event_id for game in games] == ["401772918"]
+
+
+@given("a cached ESPN payload with a non-boolean completed flag")
+def non_boolean_completed_flag(espn_context):
+    payload = _payload()
+    payload["events"][0]["competitions"][0]["status"]["type"]["completed"] = "false"
+    espn_context["connector"]._write_snapshot(
+        COMPLETED_DATE,
+        payload,
+        COMPLETED_SOURCE_URL,
+        datetime(2025, 9, 7, 18, tzinfo=timezone.utc),
+    )
+
+
 @given(parsers.parse('ESPN fails with "{failure}"'))
 def espn_provider_failure(espn_context, failure):
     request = httpx.Request("GET", COMPLETED_SOURCE_URL)
@@ -317,6 +371,8 @@ def espn_provider_failure(espn_context, failure):
             raise httpx.HTTPStatusError("unavailable", request=request, response=response)
         if failure == "timeout":
             raise httpx.ReadTimeout("timed out", request=request)
+        if failure == "TLS failure":
+            raise httpx.ConnectError("certificate verification failed", request=request)
         if failure == "invalid JSON":
             raise ValueError("invalid JSON")
         raise AssertionError(f"Unsupported BDD provider failure: {failure}")

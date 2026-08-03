@@ -170,6 +170,7 @@ class EspnConnector(APIConnector):
         retrieved_at = self._as_utc(retrieved_at)
         raw_payload = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         snapshot = {
+            "normalization_version": self.NORMALIZATION_VERSION,
             "source_url": source_url,
             "retrieved_at": retrieved_at.isoformat(),
             "payload_sha256": hashlib.sha256(raw_payload.encode()).hexdigest(),
@@ -179,7 +180,15 @@ class EspnConnector(APIConnector):
         directory.mkdir(parents=True, exist_ok=True)
         timestamp = retrieved_at.strftime("%Y%m%dT%H%M%S%fZ")
         path = directory / f"{timestamp}.json"
-        path.write_text(json.dumps(snapshot, sort_keys=True, indent=2), encoding="utf-8")
+        encoded_snapshot = json.dumps(snapshot, sort_keys=True, indent=2)
+        try:
+            with path.open("x", encoding="utf-8") as snapshot_file:
+                snapshot_file.write(encoded_snapshot)
+        except FileExistsError:
+            if path.read_text(encoding="utf-8") != encoded_snapshot:
+                raise EspnSchemaError(
+                    f"Refusing to overwrite immutable ESPN snapshot: {path}."
+                ) from None
         snapshot["snapshot_path"] = str(path)
         return snapshot
 
@@ -271,7 +280,9 @@ class EspnConnector(APIConnector):
             raise EspnSchemaError(f"Event {event_id} is missing status metadata.")
         status_type = status["type"]
         status_name = self._required_text(status_type, "name", f"event {event_id} status")
-        completed = bool(status_type.get("completed", False))
+        completed = status_type.get("completed")
+        if not isinstance(completed, bool):
+            raise EspnSchemaError(f"Event {event_id} completed status must be a boolean.")
         home_score = self._score(by_side["home"], event_id)
         away_score = self._score(by_side["away"], event_id)
         if completed and (home_score is None or away_score is None):
@@ -294,14 +305,22 @@ class EspnConnector(APIConnector):
             source_url=snapshot["source_url"],
             raw_snapshot_path=snapshot["snapshot_path"],
             raw_snapshot_sha256=snapshot["payload_sha256"],
-            normalization_version=self.NORMALIZATION_VERSION,
+            normalization_version=snapshot["normalization_version"],
         )
 
     @staticmethod
     def _validate_snapshot_envelope(snapshot: dict[str, Any]) -> None:
-        for field in ("source_url", "retrieved_at", "payload_sha256", "payload"):
+        for field in (
+            "normalization_version",
+            "source_url",
+            "retrieved_at",
+            "payload_sha256",
+            "payload",
+        ):
             if field not in snapshot:
                 raise ValueError(f"missing {field}")
+        if snapshot["normalization_version"] != EspnConnector.NORMALIZATION_VERSION:
+            raise ValueError("normalization version is unsupported")
         if not isinstance(snapshot["source_url"], str):
             raise ValueError("source URL is invalid")
         if not isinstance(snapshot["retrieved_at"], str):
@@ -331,6 +350,8 @@ class EspnConnector(APIConnector):
         score = competitor.get("score")
         if score in (None, ""):
             return None
+        if isinstance(score, bool):
+            raise EspnSchemaError(f"Event {event_id} has a non-integer score.")
         try:
             numeric_score = int(score)
         except (TypeError, ValueError) as error:

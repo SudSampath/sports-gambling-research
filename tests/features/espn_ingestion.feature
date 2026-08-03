@@ -49,8 +49,19 @@ Feature: SUD-23 cache-first ESPN NFL ingestion
     When I request the corrupt cached game
     Then a typed ESPN schema error is returned
 
+  Scenario: Raw snapshots are immutable at a retrieval timestamp
+    Given a completed ESPN snapshot at a fixed retrieval timestamp
+    When a different payload is stored at the same retrieval timestamp
+    Then a typed immutable snapshot error is returned
+    And the original snapshot remains valid
+
   Scenario: Provider schema drift fails closed
     Given a cached ESPN payload with an unsupported event schema
+    When I request the schema-drifted cached game
+    Then a typed ESPN schema error is returned
+
+  Scenario: Non-boolean completion status fails closed
+    Given a cached ESPN payload with a non-boolean completed flag
     When I request the schema-drifted cached game
     Then a typed ESPN schema error is returned
 
@@ -63,4 +74,5 @@ Feature: SUD-23 cache-first ESPN NFL ingestion
       | failure      |
       | HTTP status  |
       | timeout      |
+      | TLS failure  |
       | invalid JSON |
