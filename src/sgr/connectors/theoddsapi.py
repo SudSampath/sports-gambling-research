@@ -15,7 +15,7 @@ class TheOddsAPIConnector(APIConnector):
         payload = await self.get_json(
             f"sports/{sport}/odds",
             params={
-                "apiKey": settings.theodds_api_key,
+                "apiKey": settings.require_theodds_api_key(),
                 "regions": regions,
                 "markets": "h2h",
                 "oddsFormat": "decimal",
