@@ -1,0 +1,59 @@
+{
+  "events": [
+    {
+      "id": "401772918",
+      "date": "2025-09-08T00:20Z",
+      "season": {
+        "year": 2025,
+        "type": 2,
+        "slug": "regular-season"
+      },
+      "week": {
+        "number": 1
+      },
+      "competitions": [
+        {
+          "neutralSite": false,
+          "status": {
+            "type": {
+              "name": "STATUS_FINAL",
+              "completed": true
+            }
+          },
+          "competitors": [
+            {
+              "homeAway": "away",
+              "score": "40",
+              "team": {
+                "id": "33",
+                "abbreviation": "BAL",
+                "displayName": "Baltimore Ravens"
+              }
+            },
+            {
+              "homeAway": "home",
+              "score": "41",
+              "team": {
+                "id": "2",
+                "abbreviation": "BUF",
+                "displayName": "Buffalo Bills"
+              }
+            }
+          ],
+          "odds": [
+            {
+              "provider": {
+                "name": "excluded-test-provider"
+              }
+            }
+          ],
+          "predictor": {
+            "homeTeam": {
+              "gameProjection": "excluded-test-value"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
