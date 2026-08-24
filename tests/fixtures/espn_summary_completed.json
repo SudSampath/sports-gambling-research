@@ -1,0 +1,71 @@
+{
+  "boxscore": {
+    "teams": [],
+    "players": [
+      {
+        "team": {"id": "33", "abbreviation": "BAL", "displayName": "Baltimore Ravens"},
+        "statistics": [
+          {
+            "name": "passing",
+            "labels": ["C/ATT", "YDS", "AVG", "TD", "INT", "SACKS", "QBR", "RTG"],
+            "athletes": [
+              {
+                "athlete": {"id": "3916387", "displayName": "Lamar Jackson", "jersey": "8"},
+                "stats": ["14/19", "209", "11.0", "2", "0", "2-15", "94.9", "144.4"]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "team": {"id": "2", "abbreviation": "BUF", "displayName": "Buffalo Bills"},
+        "statistics": [
+          {
+            "name": "rushing",
+            "labels": ["CAR", "YDS", "AVG", "TD", "LONG"],
+            "athletes": [
+              {
+                "athlete": {"id": "4241457", "displayName": "James Cook", "jersey": "4"},
+                "stats": ["18", "89", "4.9", "1", "22"]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "injuries": [
+    {
+      "team": {"id": "2", "abbreviation": "BUF", "displayName": "Buffalo Bills"},
+      "injuries": [
+        {
+          "status": "Questionable",
+          "date": "2026-08-24T19:32Z",
+          "athlete": {
+            "id": "3915411",
+            "displayName": "Ty Johnson",
+            "position": {"name": "Running Back", "displayName": "Running Back", "abbreviation": "RB"}
+          }
+        }
+      ]
+    },
+    {
+      "team": {"id": "33", "abbreviation": "BAL", "displayName": "Baltimore Ravens"},
+      "injuries": [
+        {
+          "status": "Out",
+          "date": "2026-08-23T15:00Z",
+          "athlete": {
+            "id": "9999901",
+            "displayName": "Sample Player",
+            "position": {"name": "Wide Receiver", "displayName": "Wide Receiver", "abbreviation": "WR"}
+          }
+        }
+      ]
+    }
+  ],
+  "predictor": {"note": "must never be read into any canonical record"},
+  "odds": [{"note": "must never be read into any canonical record"}],
+  "pickcenter": [{"note": "must never be read into any canonical record"}],
+  "winprobability": [{"note": "must never be read into any canonical record"}]
+}

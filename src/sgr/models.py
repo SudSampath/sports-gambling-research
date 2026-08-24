@@ -63,6 +63,53 @@ class NFLGame(BaseModel):
     normalization_version: str
 
 
+class NFLAthlete(BaseModel):
+    """Canonical player identity supplied by ESPN's NFL summary endpoint."""
+
+    espn_athlete_id: str
+    display_name: str
+    position: str | None = None
+
+
+class NFLPlayerStatline(BaseModel):
+    """One player's stat line in one category of one completed game's boxscore."""
+
+    event_id: str
+    team: NFLTeam
+    athlete: NFLAthlete
+    stat_category: str
+    stat_labels: tuple[str, ...]
+    stat_values: tuple[str, ...]
+    retrieved_at: datetime
+    source_url: str
+    raw_snapshot_path: str
+    raw_snapshot_sha256: str
+    normalization_version: str
+
+
+class NFLInjuryReport(BaseModel):
+    """One player's injury-status entry as reported at retrieval time.
+
+    reported_at is ESPN's own "date" field on the entry -- when ESPN itself
+    published this status, not the game's kickoff. Verified live: querying
+    an old completed game's summary returns the *current* team injury
+    report regardless of which game is queried, so this can only ever
+    represent "what ESPN is reporting right now," never a reconstructed
+    historical pregame state.
+    """
+
+    event_id: str
+    team: NFLTeam
+    athlete: NFLAthlete
+    status_text: str
+    reported_at: datetime
+    retrieved_at: datetime
+    source_url: str
+    raw_snapshot_path: str
+    raw_snapshot_sha256: str
+    normalization_version: str
+
+
 class Signal(BaseModel):
     strategy: str
     market_id: str

@@ -32,6 +32,7 @@ TABLES = {
     "paper_recommendation": "paper_recommendations",
     "outcome": "outcomes",
     "availability_report": "availability_reports",
+    "player_game_statline": "player_game_statlines",
 }
 
 

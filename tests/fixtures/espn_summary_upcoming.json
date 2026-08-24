@@ -1,0 +1,26 @@
+{
+  "boxscore": {
+    "teams": [],
+    "players": null
+  },
+  "injuries": [
+    {
+      "team": {"id": "26", "abbreviation": "SEA", "displayName": "Seattle Seahawks"},
+      "injuries": [
+        {
+          "status": "Questionable",
+          "date": "2026-08-24T13:32Z",
+          "athlete": {
+            "id": "4248455",
+            "displayName": "Rodney Thomas II",
+            "position": {"name": "Safety", "displayName": "Safety", "abbreviation": "S"}
+          }
+        }
+      ]
+    }
+  ],
+  "predictor": {"note": "must never be read into any canonical record"},
+  "odds": [{"note": "must never be read into any canonical record"}],
+  "pickcenter": [{"note": "must never be read into any canonical record"}],
+  "winprobability": [{"note": "must never be read into any canonical record"}]
+}

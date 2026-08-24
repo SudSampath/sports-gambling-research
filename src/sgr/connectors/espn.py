@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 
 from sgr.connectors.base import APIConnector, APIRequestError
-from sgr.models import NFLGame, NFLSeasonType, NFLTeam
+from sgr.models import NFLAthlete, NFLGame, NFLInjuryReport, NFLPlayerStatline, NFLSeasonType, NFLTeam
 
 
 class EspnError(RuntimeError):
@@ -32,6 +32,11 @@ class EspnConnector(APIConnector):
     """Cache-first, read-only adapter for ESPN's unofficial NFL scoreboard feed."""
 
     NORMALIZATION_VERSION = "espn-scoreboard-v1"
+    NORMALIZATION_VERSION_SUMMARY = "espn-summary-v1"
+    # ESPN fields that must never be read into any canonical record, per the
+    # PRD's rule against provider win-probability/odds leakage. Not parsed
+    # anywhere below; listed here so the boundary is explicit and greppable.
+    EXCLUDED_SUMMARY_FIELDS = ("predictor", "odds", "pickcenter", "winprobability")
     ESPN_SEASON_TYPES = {
         NFLSeasonType.PRESEASON: 1,
         NFLSeasonType.REGULAR: 2,
@@ -116,6 +121,146 @@ class EspnConnector(APIConnector):
             refresh=refresh,
         )
 
+    async def game_summary(
+        self, event_id: str, *, refresh: bool = False
+    ) -> tuple[list[NFLPlayerStatline], list[NFLInjuryReport]]:
+        """Return one game's player boxscore and its injuries field as currently reported.
+
+        Cache-first like the scoreboard methods, but intentionally has no
+        prediction_at parameter: ESPN's injuries field reflects the
+        *current* team injury report regardless of which event_id is
+        queried (verified live against a 2023 game -- the entries came
+        back dated the current day). A cached snapshot's own retrieved_at
+        is therefore the only honest timestamp for injuries; there is no
+        historical injury state to select among by requesting an old
+        event_id. Point-in-time injury reconstruction can only come from
+        a caller's own accumulated snapshot history going forward.
+        """
+        if not event_id or not event_id.strip():
+            raise ValueError("event_id must be a non-empty string.")
+        query_key = f"event-{event_id}"
+        snapshot = None if refresh else self._latest_snapshot(
+            query_key, namespace="nfl-summary", normalization_version=self.NORMALIZATION_VERSION_SUMMARY
+        )
+        if snapshot is None:
+            snapshot = await self._fetch_and_store(
+                query_key,
+                {"event": event_id},
+                endpoint="summary",
+                namespace="nfl-summary",
+                normalization_version=self.NORMALIZATION_VERSION_SUMMARY,
+            )
+        return self._normalize_summary_snapshot(event_id, snapshot)
+
+    def _normalize_summary_snapshot(
+        self, event_id: str, snapshot: dict[str, Any]
+    ) -> tuple[list[NFLPlayerStatline], list[NFLInjuryReport]]:
+        self._validate_snapshot_envelope(snapshot, normalization_version=self.NORMALIZATION_VERSION_SUMMARY)
+        payload = snapshot["payload"]
+        retrieved_at = self._as_utc(datetime.fromisoformat(snapshot["retrieved_at"]))
+        statlines = self._normalize_boxscore(event_id, payload.get("boxscore"), snapshot, retrieved_at)
+        injuries = self._normalize_injuries(event_id, payload.get("injuries"), snapshot, retrieved_at)
+        return statlines, injuries
+
+    def _normalize_boxscore(
+        self, event_id: str, boxscore: Any, snapshot: dict[str, Any], retrieved_at: datetime
+    ) -> list[NFLPlayerStatline]:
+        if boxscore is None:
+            return []  # game has not been played yet
+        if not isinstance(boxscore, dict):
+            raise EspnSchemaError(f"Event {event_id} boxscore must be an object.")
+        players = boxscore.get("players")
+        if players is None:
+            return []
+        if not isinstance(players, list):
+            raise EspnSchemaError(f"Event {event_id} boxscore players must be a list.")
+
+        statlines: list[NFLPlayerStatline] = []
+        for team_block in players:
+            if not isinstance(team_block, dict):
+                raise EspnSchemaError(f"Event {event_id} boxscore team entry must be an object.")
+            team = self._team_from_dict(team_block.get("team"), f"event {event_id} boxscore team")
+            statistics = team_block.get("statistics")
+            if not isinstance(statistics, list):
+                raise EspnSchemaError(f"Event {event_id} boxscore team is missing statistics.")
+            for category in statistics:
+                if not isinstance(category, dict):
+                    raise EspnSchemaError(f"Event {event_id} boxscore category must be an object.")
+                category_name = self._required_text(category, "name", f"event {event_id} boxscore category")
+                labels = category.get("labels")
+                if not isinstance(labels, list) or not all(isinstance(label, str) for label in labels):
+                    raise EspnSchemaError(f"Event {event_id} boxscore category {category_name} has invalid labels.")
+                athletes = category.get("athletes")
+                if not isinstance(athletes, list):
+                    raise EspnSchemaError(f"Event {event_id} boxscore category {category_name} is missing athletes.")
+                for entry in athletes:
+                    if not isinstance(entry, dict):
+                        raise EspnSchemaError(f"Event {event_id} boxscore athlete entry must be an object.")
+                    athlete = self._athlete(entry.get("athlete"), event_id)
+                    stats = entry.get("stats")
+                    if not isinstance(stats, list) or not all(isinstance(value, str) for value in stats):
+                        raise EspnSchemaError(
+                            f"Event {event_id} boxscore stats for {athlete.display_name} are invalid."
+                        )
+                    statlines.append(
+                        NFLPlayerStatline(
+                            event_id=event_id,
+                            team=team,
+                            athlete=athlete,
+                            stat_category=category_name,
+                            stat_labels=tuple(labels),
+                            stat_values=tuple(stats),
+                            retrieved_at=retrieved_at,
+                            source_url=snapshot["source_url"],
+                            raw_snapshot_path=snapshot["snapshot_path"],
+                            raw_snapshot_sha256=snapshot["payload_sha256"],
+                            normalization_version=snapshot["normalization_version"],
+                        )
+                    )
+        return statlines
+
+    def _normalize_injuries(
+        self, event_id: str, injuries: Any, snapshot: dict[str, Any], retrieved_at: datetime
+    ) -> list[NFLInjuryReport]:
+        if injuries is None:
+            return []
+        if not isinstance(injuries, list):
+            raise EspnSchemaError(f"Event {event_id} injuries must be a list.")
+
+        reports: list[NFLInjuryReport] = []
+        for team_block in injuries:
+            if not isinstance(team_block, dict):
+                raise EspnSchemaError(f"Event {event_id} injuries team entry must be an object.")
+            team = self._team_from_dict(team_block.get("team"), f"event {event_id} injuries team")
+            entries = team_block.get("injuries")
+            if not isinstance(entries, list):
+                raise EspnSchemaError(f"Event {event_id} injuries team is missing its injuries list.")
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    raise EspnSchemaError(f"Event {event_id} injury entry must be an object.")
+                athlete = self._athlete(entry.get("athlete"), event_id)
+                status_text = self._required_text(
+                    entry, "status", f"event {event_id} injury for {athlete.display_name}"
+                )
+                reported_at = self._parse_datetime(
+                    self._required_text(entry, "date", f"event {event_id} injury for {athlete.display_name}")
+                )
+                reports.append(
+                    NFLInjuryReport(
+                        event_id=event_id,
+                        team=team,
+                        athlete=athlete,
+                        status_text=status_text,
+                        reported_at=reported_at,
+                        retrieved_at=retrieved_at,
+                        source_url=snapshot["source_url"],
+                        raw_snapshot_path=snapshot["snapshot_path"],
+                        raw_snapshot_sha256=snapshot["payload_sha256"],
+                        normalization_version=snapshot["normalization_version"],
+                    )
+                )
+        return reports
+
     async def _games_for_query(
         self,
         query_key: date | str,
@@ -141,24 +286,33 @@ class EspnConnector(APIConnector):
         return self._normalize_snapshot(snapshot)
 
     async def _fetch_and_store(
-        self, query_key: date | str, params: dict[str, str | int]
+        self,
+        query_key: date | str,
+        params: dict[str, str | int],
+        *,
+        endpoint: str = "scoreboard",
+        namespace: str = "nfl-scoreboard",
+        normalization_version: str | None = None,
     ) -> dict[str, Any]:
-        source_url = self._source_url(params)
+        source_url = self._source_url(params, endpoint=endpoint)
         try:
-            payload = await self.get_json("scoreboard", params=params)
+            payload = await self.get_json(endpoint, params=params)
         except APIRequestError as error:
-            raise EspnRequestError(f"ESPN scoreboard request failed: {error}") from error
+            raise EspnRequestError(f"ESPN {endpoint} request failed: {error}") from error
         except httpx.HTTPStatusError as error:
             status = error.response.status_code if error.response is not None else "unknown"
-            raise EspnRequestError(f"ESPN scoreboard request failed with HTTP status {status}.") from error
+            raise EspnRequestError(f"ESPN {endpoint} request failed with HTTP status {status}.") from error
         except httpx.HTTPError as error:
-            raise EspnRequestError("ESPN scoreboard request failed; retry after checking connectivity.") from error
+            raise EspnRequestError(f"ESPN {endpoint} request failed; retry after checking connectivity.") from error
         except (TypeError, ValueError) as error:
-            raise EspnRequestError("ESPN scoreboard response was not valid JSON.") from error
+            raise EspnRequestError(f"ESPN {endpoint} response was not valid JSON.") from error
 
         if not isinstance(payload, dict):
-            raise EspnSchemaError("ESPN scoreboard response must be a JSON object.")
-        return self._write_snapshot(query_key, payload, source_url, datetime.now(timezone.utc))
+            raise EspnSchemaError(f"ESPN {endpoint} response must be a JSON object.")
+        return self._write_snapshot(
+            query_key, payload, source_url, datetime.now(timezone.utc),
+            namespace=namespace, normalization_version=normalization_version,
+        )
 
     def _write_snapshot(
         self,
@@ -166,19 +320,22 @@ class EspnConnector(APIConnector):
         payload: dict[str, Any],
         source_url: str,
         retrieved_at: datetime,
+        *,
+        namespace: str = "nfl-scoreboard",
+        normalization_version: str | None = None,
     ) -> dict[str, Any]:
         """Persist raw response data and the metadata required to reproduce it."""
 
         retrieved_at = self._as_utc(retrieved_at)
         raw_payload = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         snapshot = {
-            "normalization_version": self.NORMALIZATION_VERSION,
+            "normalization_version": normalization_version or self.NORMALIZATION_VERSION,
             "source_url": source_url,
             "retrieved_at": retrieved_at.isoformat(),
             "payload_sha256": hashlib.sha256(raw_payload.encode()).hexdigest(),
             "payload": payload,
         }
-        directory = self.cache_dir / "nfl-scoreboard" / self._cache_key(query_key)
+        directory = self.cache_dir / namespace / self._cache_key(query_key)
         directory.mkdir(parents=True, exist_ok=True)
         timestamp = retrieved_at.strftime("%Y%m%dT%H%M%S%fZ")
         path = directory / f"{timestamp}.json"
@@ -194,30 +351,39 @@ class EspnConnector(APIConnector):
         snapshot["snapshot_path"] = str(path)
         return snapshot
 
-    def _latest_snapshot(self, query_key: date | str) -> dict[str, Any] | None:
-        snapshots = self._load_snapshots(query_key)
+    def _latest_snapshot(
+        self, query_key: date | str, *, namespace: str = "nfl-scoreboard", normalization_version: str | None = None
+    ) -> dict[str, Any] | None:
+        snapshots = self._load_snapshots(query_key, namespace=namespace, normalization_version=normalization_version)
         return snapshots[-1] if snapshots else None
 
     def _latest_snapshot_before(
-        self, query_key: date | str, prediction_at: datetime
+        self,
+        query_key: date | str,
+        prediction_at: datetime,
+        *,
+        namespace: str = "nfl-scoreboard",
+        normalization_version: str | None = None,
     ) -> dict[str, Any] | None:
         prediction_at = self._as_utc(prediction_at)
         candidates = [
             snapshot
-            for snapshot in self._load_snapshots(query_key)
+            for snapshot in self._load_snapshots(query_key, namespace=namespace, normalization_version=normalization_version)
             if self._as_utc(datetime.fromisoformat(snapshot["retrieved_at"])) <= prediction_at
         ]
         return candidates[-1] if candidates else None
 
-    def _load_snapshots(self, query_key: date | str) -> list[dict[str, Any]]:
-        directory = self.cache_dir / "nfl-scoreboard" / self._cache_key(query_key)
+    def _load_snapshots(
+        self, query_key: date | str, *, namespace: str = "nfl-scoreboard", normalization_version: str | None = None
+    ) -> list[dict[str, Any]]:
+        directory = self.cache_dir / namespace / self._cache_key(query_key)
         snapshots: list[dict[str, Any]] = []
         for path in sorted(directory.glob("*.json")) if directory.exists() else []:
             try:
                 snapshot = json.loads(path.read_text(encoding="utf-8"))
                 if not isinstance(snapshot, dict):
                     raise ValueError("snapshot is not an object")
-                self._validate_snapshot_envelope(snapshot)
+                self._validate_snapshot_envelope(snapshot, normalization_version=normalization_version)
             except (OSError, json.JSONDecodeError, ValueError, KeyError) as error:
                 raise EspnSchemaError(f"Cached ESPN snapshot is invalid: {path}.") from error
             snapshot["snapshot_path"] = str(path)
@@ -311,7 +477,7 @@ class EspnConnector(APIConnector):
         )
 
     @staticmethod
-    def _validate_snapshot_envelope(snapshot: dict[str, Any]) -> None:
+    def _validate_snapshot_envelope(snapshot: dict[str, Any], *, normalization_version: str | None = None) -> None:
         for field in (
             "normalization_version",
             "source_url",
@@ -321,7 +487,7 @@ class EspnConnector(APIConnector):
         ):
             if field not in snapshot:
                 raise ValueError(f"missing {field}")
-        if snapshot["normalization_version"] != EspnConnector.NORMALIZATION_VERSION:
+        if snapshot["normalization_version"] != (normalization_version or EspnConnector.NORMALIZATION_VERSION):
             raise ValueError("normalization version is unsupported")
         if not isinstance(snapshot["source_url"], str):
             raise ValueError("source URL is invalid")
@@ -338,13 +504,32 @@ class EspnConnector(APIConnector):
 
     @staticmethod
     def _team(competitor: dict[str, Any], event_id: str) -> NFLTeam:
-        team = competitor.get("team")
-        if not isinstance(team, dict):
-            raise EspnSchemaError(f"Event {event_id} competitor is missing team metadata.")
+        return EspnConnector._team_from_dict(competitor.get("team"), f"event {event_id} team")
+
+    @staticmethod
+    def _team_from_dict(team_info: Any, context: str) -> NFLTeam:
+        if not isinstance(team_info, dict):
+            raise EspnSchemaError(f"{context} is missing team metadata.")
         return NFLTeam(
-            espn_team_id=EspnConnector._required_text(team, "id", f"event {event_id} team"),
-            abbreviation=EspnConnector._required_text(team, "abbreviation", f"event {event_id} team"),
-            name=EspnConnector._required_text(team, "displayName", f"event {event_id} team"),
+            espn_team_id=EspnConnector._required_text(team_info, "id", context),
+            abbreviation=EspnConnector._required_text(team_info, "abbreviation", context),
+            name=EspnConnector._required_text(team_info, "displayName", context),
+        )
+
+    @staticmethod
+    def _athlete(athlete_info: Any, event_id: str) -> NFLAthlete:
+        if not isinstance(athlete_info, dict):
+            raise EspnSchemaError(f"Event {event_id} entry is missing athlete metadata.")
+        position = athlete_info.get("position")
+        position_name = None
+        if isinstance(position, dict):
+            raw_position = position.get("abbreviation") or position.get("displayName")
+            if isinstance(raw_position, str) and raw_position.strip():
+                position_name = raw_position
+        return NFLAthlete(
+            espn_athlete_id=EspnConnector._required_text(athlete_info, "id", f"event {event_id} athlete"),
+            display_name=EspnConnector._required_text(athlete_info, "displayName", f"event {event_id} athlete"),
+            position=position_name,
         )
 
     @staticmethod
@@ -402,5 +587,5 @@ class EspnConnector(APIConnector):
         ):
             raise ValueError("week must be an integer between 1 and 25.")
 
-    def _source_url(self, params: dict[str, str | int]) -> str:
-        return f"{self.base_url}/scoreboard?{httpx.QueryParams(params)}"
+    def _source_url(self, params: dict[str, str | int], *, endpoint: str = "scoreboard") -> str:
+        return f"{self.base_url}/{endpoint}?{httpx.QueryParams(params)}"
