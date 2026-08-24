@@ -135,3 +135,19 @@ def standard_runner_only(workflow):
 def quality_job_named(workflow):
     names = [job.get("name") for job in _jobs(workflow).values()]
     assert "BDD and full suite" in names
+
+
+@then("PYTHONPATH is set to src for the quality job")
+def pythonpath_set_for_cli_step(workflow):
+    # The package is never pip-installed (only its dependencies are);
+    # pytest's own pythonpath ini option covers the two pytest steps, but
+    # "python -m sgr.cli" run directly needs this set explicitly, at the
+    # job level or on its own step -- caught by an actual failed GitHub
+    # Actions run before this assertion was added.
+    for job in _jobs(workflow).values():
+        if job.get("env", {}).get("PYTHONPATH") == "src":
+            return
+        for step in job.get("steps", []):
+            if "sgr.cli" in step.get("run", "") and step.get("env", {}).get("PYTHONPATH") == "src":
+                return
+    pytest.fail("no job- or step-level PYTHONPATH=src found for the CLI step")

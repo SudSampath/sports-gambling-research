@@ -17,6 +17,11 @@ jobs:
     name: BDD and full suite
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      # The package isn't installed (only its dependencies are); pytest's
+      # own pythonpath ini option covers the two pytest steps, but "python
+      # -m sgr.cli" outside pytest needs this set explicitly too.
+      PYTHONPATH: src
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

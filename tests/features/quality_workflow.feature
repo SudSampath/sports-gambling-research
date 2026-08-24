@@ -35,3 +35,7 @@ Feature: SUD-73 GitHub quality-gate workflow contract
   Scenario: The required check is named for branch protection
     Given the quality workflow file
     Then the quality job is named "BDD and full suite"
+
+  Scenario: The CLI step can find the package without an editable install
+    Given the quality workflow file
+    Then PYTHONPATH is set to src for the quality job
