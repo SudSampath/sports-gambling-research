@@ -33,6 +33,11 @@ SHRINKAGE_PSEUDOGAMES = 4
 # is the ticket that properly calibrates this against realized outcomes.
 HOME_FIELD_LOGIT_BUMP = 0.25
 
+# This module's own fixed constants, with no fitted recalibration applied.
+# SUD-39's calibration layer either confirms this is still the best choice
+# for a given training fold or supersedes it with CALIBRATION_VERSION_PLATT.
+CALIBRATION_VERSION_UNCALIBRATED = "uncalibrated-v1"
+
 _PROBABILITY_EPSILON = 1e-6
 
 
@@ -137,18 +142,21 @@ def shrink_toward_prior(
     current_value: float | None,
     current_n: int,
     prior_value: float | None,
-    prior_n: int,
     *,
     pseudogames: int = SHRINKAGE_PSEUDOGAMES,
 ) -> tuple[float | None, float]:
-    """Blend a current-season per-game rate toward a prior-season rate.
+    """Blend a current-season per-game rate toward a prior rate.
 
     weight = current_n / (current_n + pseudogames) is the predeclared
-    shrinkage rule referenced throughout this module and in evaluation
-    baselines: early in a season (current_n small) the estimate leans on
-    the prior season; by roughly `pseudogames` current games it already
-    dominates. Returns (blended_value, weight_on_current); blended_value
-    is None only if both inputs are None (no data at all).
+    shrinkage rule referenced throughout this module, evaluation
+    baselines, and probability calibration: early in a season (current_n
+    small) the estimate leans on the prior; by roughly `pseudogames`
+    current games it already dominates. There is deliberately no prior_n
+    parameter -- this is a fixed-pseudo-count shrinkage toward a point
+    estimate, not a hierarchical model that also weighs the prior's own
+    sample size, so a prior sample count would be accepted but never
+    affect the result. Returns (blended_value, weight_on_current);
+    blended_value is None only if both inputs are None (no data at all).
     """
     if current_value is None and prior_value is None:
         return None, 0.0
@@ -224,11 +232,11 @@ def compute_team_strength(
     prior_ppg_against = prior_pa / prior_games_played if prior_games_played else None
 
     blended_for, weight = shrink_toward_prior(
-        current_ppg_for, current_games_played, prior_ppg_for, prior_games_played,
+        current_ppg_for, current_games_played, prior_ppg_for,
         pseudogames=shrinkage_pseudogames,
     )
     blended_against, _ = shrink_toward_prior(
-        current_ppg_against, current_games_played, prior_ppg_against, prior_games_played,
+        current_ppg_against, current_games_played, prior_ppg_against,
         pseudogames=shrinkage_pseudogames,
     )
 
@@ -276,6 +284,11 @@ def logit(p: float) -> float:
 
 
 def sigmoid(z: float) -> float:
+    # math.exp overflows for very negative z (exp(-z) with large positive
+    # -z); the mathematical limit there is 0.0, so clamp rather than crash.
+    # Large positive z is already safe (exp(-z) underflows to 0.0 quietly).
+    if z < -700:
+        return 0.0
     return 1 / (1 + math.exp(-z))
 
 
@@ -348,4 +361,6 @@ def generate_forecast(
         away_shrinkage_weight=Decimal(str(round(away_strength.shrinkage_weight, 6))),
         training_window_start=training_window_start,
         home_field_applied=home_field_applied,
+        calibration_version=CALIBRATION_VERSION_UNCALIBRATED,
+        abstained=False,
     )
