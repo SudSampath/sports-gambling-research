@@ -21,11 +21,17 @@
 ## Quality gates
 
 ```powershell
+python -m pytest tests/bdd
 python -m pytest
 python -m sgr.cli --help
 git diff --check
 git status --short
 ```
+
+Every Linear ticket must include executable scenarios under `tests/features/` with
+step definitions under `tests/bdd/`. A ticket can close only after its BDD scenarios
+and the full repository quality gates pass. Publish each ticket as a focused pull
+request and attach the passing test evidence to the Linear issue.
 
 Before requesting review, inspect `git status --short` and confirm that it has no
 unexpected `.env`, PEM, key, certificate, or credential-export files. The ignore

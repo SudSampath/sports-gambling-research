@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ssl
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -11,10 +12,20 @@ class APIRequestError(RuntimeError):
 
 
 class APIConnector:
-    def __init__(self, base_url: str, headers: dict[str, str] | None = None, timeout: float = 15.0):
+    def __init__(
+        self,
+        base_url: str,
+        headers: dict[str, str] | None = None,
+        timeout: float = 15.0,
+        verify: ssl.SSLContext | None = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.headers = headers or {}
         self.timeout = timeout
+        # httpx otherwise prefers its bundled CA file. A verified system
+        # context supports managed Windows roots without disabling hostname or
+        # certificate validation.
+        self.verify = verify if verify is not None else ssl.create_default_context()
 
     def request_headers(self, method: str, path: str) -> dict[str, str]:
         """Headers for a single request.
@@ -31,7 +42,7 @@ class APIConnector:
         url = f"{self.base_url}/{path.lstrip('/')}"
         # Query parameters stay out of `url` so the signed path excludes them.
         headers = self.request_headers("GET", urlsplit(url).path)
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, verify=self.verify) as client:
             response = await client.get(url, params=params, headers=headers)
             try:
                 response.raise_for_status()
