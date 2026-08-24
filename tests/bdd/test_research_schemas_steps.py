@@ -90,6 +90,7 @@ def _examples() -> dict[str, object]:
             away_team_id=away_id,
             kickoff_at=kickoff,
             status="scheduled",
+            completed=False,
             neutral_site=False,
         ),
         TeamStrengthSnapshot(

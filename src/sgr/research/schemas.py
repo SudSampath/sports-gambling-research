@@ -103,7 +103,16 @@ class Game(CanonicalRecord):
     away_team_id: str
     kickoff_at: datetime
     status: str
+    completed: bool
     neutral_site: bool | None = None
+    home_score: int | None = Field(default=None, ge=0)
+    away_score: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def scores_match_completion(self) -> Game:
+        if self.completed and (self.home_score is None or self.away_score is None):
+            raise ValueError("A completed game must record both final scores.")
+        return self
 
 
 class TeamStrengthSnapshot(CanonicalRecord):
