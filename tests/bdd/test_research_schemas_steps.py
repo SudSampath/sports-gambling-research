@@ -158,6 +158,13 @@ def _examples() -> dict[str, object]:
             home_win_probability=Decimal("0.58"),
             tie_probability=Decimal("0.01"),
             uncertainty=Decimal("0.08"),
+            exponent=Decimal("2.37"),
+            home_games_played=6,
+            away_games_played=6,
+            home_shrinkage_weight=Decimal("0.6"),
+            away_shrinkage_weight=Decimal("0.6"),
+            training_window_start=retrieved,
+            home_field_applied=True,
         ),
         MatchDecision(
             id=decision_id,

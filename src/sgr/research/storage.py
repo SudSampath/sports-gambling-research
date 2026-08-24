@@ -140,6 +140,17 @@ class ResearchStore:
             raise KeyError(f"No {entity_type} record exists with ID {record_id}.")
         return load_canonical_record(row[0])
 
+    def load_all(self, entity_type: str) -> list[CanonicalRecord]:
+        """Load every record of one entity type, for callers that need to filter
+        in Python (e.g. by kickoff time) rather than by an indexed SQL column."""
+        table = TABLES[entity_type]
+        with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            try:
+                rows = connection.execute(f"SELECT payload_json FROM {table}").fetchall()
+            except duckdb.CatalogException:
+                return []
+        return [load_canonical_record(row[0]) for row in rows]
+
     def lineage_for_recommendation(self, recommendation_id: str) -> CanonicalLineage:
         recommendation = self.load("paper_recommendation", recommendation_id)
         assert isinstance(recommendation, PaperRecommendation)
