@@ -133,11 +133,38 @@ class TeamStrength:
     training_window_start: datetime
 
 
-def _team_games(games: list[Game], team_id: str) -> list[Game]:
+def shrink_toward_prior(
+    current_value: float | None,
+    current_n: int,
+    prior_value: float | None,
+    prior_n: int,
+    *,
+    pseudogames: int = SHRINKAGE_PSEUDOGAMES,
+) -> tuple[float | None, float]:
+    """Blend a current-season per-game rate toward a prior-season rate.
+
+    weight = current_n / (current_n + pseudogames) is the predeclared
+    shrinkage rule referenced throughout this module and in evaluation
+    baselines: early in a season (current_n small) the estimate leans on
+    the prior season; by roughly `pseudogames` current games it already
+    dominates. Returns (blended_value, weight_on_current); blended_value
+    is None only if both inputs are None (no data at all).
+    """
+    if current_value is None and prior_value is None:
+        return None, 0.0
+    if current_value is None:
+        return prior_value, 0.0
+    if prior_value is None:
+        return current_value, 1.0
+    weight = current_n / (current_n + pseudogames)
+    return weight * current_value + (1 - weight) * prior_value, weight
+
+
+def team_games(games: list[Game], team_id: str) -> list[Game]:
     return [g for g in games if g.home_team_id == team_id or g.away_team_id == team_id]
 
 
-def _points_for_against(games: list[Game], team_id: str) -> tuple[int, int]:
+def points_for_against(games: list[Game], team_id: str) -> tuple[int, int]:
     points_for = 0
     points_against = 0
     for game in games:
@@ -173,10 +200,10 @@ def compute_team_strength(
         if g.season_type == NFLSeasonType.REGULAR and g.completed and g.kickoff_at < feature_cutoff_at
     ]
 
-    current_season_games = _team_games(
+    current_season_games = team_games(
         [g for g in eligible if g.season_year == season_year], team_id
     )
-    prior_season_games = _team_games(
+    prior_season_games = team_games(
         [g for g in eligible if g.season_year == season_year - 1], team_id
     )
 
@@ -186,8 +213,8 @@ def compute_team_strength(
             f"before {feature_cutoff_at.isoformat()}."
         )
 
-    current_pf, current_pa = _points_for_against(current_season_games, team_id)
-    prior_pf, prior_pa = _points_for_against(prior_season_games, team_id)
+    current_pf, current_pa = points_for_against(current_season_games, team_id)
+    prior_pf, prior_pa = points_for_against(prior_season_games, team_id)
     current_games_played = len(current_season_games)
     prior_games_played = len(prior_season_games)
 
@@ -196,21 +223,14 @@ def compute_team_strength(
     prior_ppg_for = prior_pf / prior_games_played if prior_games_played else None
     prior_ppg_against = prior_pa / prior_games_played if prior_games_played else None
 
-    if current_ppg_for is None:
-        # No current-season games yet: fully the prior season's rate.
-        weight = 0.0
-        blended_for = prior_ppg_for
-        blended_against = prior_ppg_against
-    elif prior_ppg_for is None:
-        # No prior season on record (e.g. first season in the dataset):
-        # fully the current season's rate, however sparse.
-        weight = 1.0
-        blended_for = current_ppg_for
-        blended_against = current_ppg_against
-    else:
-        weight = current_games_played / (current_games_played + shrinkage_pseudogames)
-        blended_for = weight * current_ppg_for + (1 - weight) * prior_ppg_for
-        blended_against = weight * current_ppg_against + (1 - weight) * prior_ppg_against
+    blended_for, weight = shrink_toward_prior(
+        current_ppg_for, current_games_played, prior_ppg_for, prior_games_played,
+        pseudogames=shrinkage_pseudogames,
+    )
+    blended_against, _ = shrink_toward_prior(
+        current_ppg_against, current_games_played, prior_ppg_against, prior_games_played,
+        pseudogames=shrinkage_pseudogames,
+    )
 
     strength = pythagorean_win_pct(blended_for, blended_against, exponent)
 
@@ -250,20 +270,20 @@ def combine_win_probabilities_log5(strength_a: float, strength_b: float) -> floa
     return (strength_a - strength_a * strength_b) / denominator
 
 
-def _logit(p: float) -> float:
+def logit(p: float) -> float:
     p = min(max(p, _PROBABILITY_EPSILON), 1 - _PROBABILITY_EPSILON)
     return math.log(p / (1 - p))
 
 
-def _sigmoid(z: float) -> float:
+def sigmoid(z: float) -> float:
     return 1 / (1 + math.exp(-z))
 
 
 def apply_home_field(raw_home_win_probability: float, *, neutral_site: bool) -> float:
     if neutral_site:
         return raw_home_win_probability
-    z = _logit(raw_home_win_probability) + HOME_FIELD_LOGIT_BUMP
-    return _sigmoid(z)
+    z = logit(raw_home_win_probability) + HOME_FIELD_LOGIT_BUMP
+    return sigmoid(z)
 
 
 def generate_forecast(

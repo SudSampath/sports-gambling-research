@@ -14,6 +14,7 @@ from sgr.backtest import run_binary_backtest
 from sgr.config import ConfigurationError
 from sgr.connectors import KalshiConnector
 from sgr.connectors.espn import EspnConnector
+from sgr.research.evaluation import run_walk_forward_evaluation
 from sgr.research.historical import SeasonCoverageError, ingest_regular_season
 from sgr.research.storage import ResearchStore
 
@@ -145,6 +146,54 @@ def ingest_historical_seasons(
         console.print(table)
 
     asyncio.run(_run())
+
+
+@app.command()
+def evaluate_pythagorean(
+    seasons: list[int] = typer.Option(..., "--season", help="Completed season year to evaluate; repeat for multiple"),
+    exponent: float = typer.Option(2.37, help="Pythagorean exponent to evaluate"),
+) -> None:
+    """Chronologically walk-forward evaluate the Pythagorean baseline (SUD-38)."""
+    store = ResearchStore()
+    report = run_walk_forward_evaluation(store, seasons, exponent=exponent)
+
+    summary = Table(title=f"Walk-forward evaluation ({report.model_version}, x={report.exponent})")
+    summary.add_column("Model")
+    summary.add_column("N")
+    summary.add_column("Excluded")
+    summary.add_column("Brier")
+    summary.add_column("Log loss")
+    summary.add_row(
+        "pythagorean (shrunk)",
+        str(report.overall.sample_count),
+        str(report.overall.excluded_count),
+        f"{report.overall.brier_score:.4f}" if report.overall.brier_score is not None else "-",
+        f"{report.overall.log_loss:.4f}" if report.overall.log_loss is not None else "-",
+    )
+    for name, metrics in report.baseline_overall.items():
+        summary.add_row(
+            name,
+            str(metrics.sample_count),
+            str(metrics.excluded_count),
+            f"{metrics.brier_score:.4f}" if metrics.brier_score is not None else "-",
+            f"{metrics.log_loss:.4f}" if metrics.log_loss is not None else "-",
+        )
+    console.print(summary)
+
+    by_season = Table(title="By season")
+    by_season.add_column("Season")
+    by_season.add_column("N")
+    by_season.add_column("Excluded")
+    by_season.add_column("Brier")
+    for year, metrics in sorted(report.by_season.items()):
+        by_season.add_row(
+            str(year),
+            str(metrics.sample_count),
+            str(metrics.excluded_count),
+            f"{metrics.brier_score:.4f}" if metrics.brier_score is not None else "-",
+        )
+    console.print(by_season)
+    console.print(f"dataset checksum: {report.dataset_checksum[:16]}  seed: {report.random_seed}")
 
 
 if __name__ == "__main__":
