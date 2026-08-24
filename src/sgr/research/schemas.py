@@ -171,11 +171,24 @@ class Forecast(CanonicalRecord):
     home_win_probability: Decimal = Field(ge=0, le=1)
     tie_probability: Decimal = Field(default=Decimal("0"), ge=0, le=1)
     uncertainty: Decimal = Field(ge=0, le=1)
+    exponent: Decimal = Field(gt=0)
+    home_games_played: int = Field(ge=0)
+    away_games_played: int = Field(ge=0)
+    home_shrinkage_weight: Decimal = Field(ge=0, le=1)
+    away_shrinkage_weight: Decimal = Field(ge=0, le=1)
+    training_window_start: datetime
+    home_field_applied: bool
 
     @model_validator(mode="after")
     def probabilities_are_coherent(self) -> Forecast:
         if self.home_win_probability + self.tie_probability > 1:
             raise ValueError("Home-win and tie probabilities may not sum above one.")
+        return self
+
+    @model_validator(mode="after")
+    def training_window_precedes_cutoff(self) -> Forecast:
+        if self.training_window_start > self.feature_cutoff_at:
+            raise ValueError("Training window cannot start after the feature cutoff.")
         return self
 
 
