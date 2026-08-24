@@ -272,6 +272,29 @@ class AvailabilityReport(CanonicalRecord):
     correction_state: AvailabilityCorrectionState = AvailabilityCorrectionState.ORIGINAL
 
 
+class PlayerGameStatline(CanonicalRecord):
+    """One player's stat line in one category of one game's boxscore.
+
+    event_time is retrieval time -- a stat line has no natural "event"
+    moment of its own distinct from the game it belongs to (already
+    captured via game_id), the same reasoning Team uses.
+    """
+
+    entity_type: Literal["player_game_statline"] = "player_game_statline"
+    player_id: str = Field(min_length=1)
+    team_id: str
+    game_id: str
+    stat_category: str = Field(min_length=1)
+    stat_labels: tuple[str, ...] = Field(min_length=1)
+    stat_values: tuple[str, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def labels_and_values_align(self) -> PlayerGameStatline:
+        if len(self.stat_labels) != len(self.stat_values):
+            raise ValueError("stat_labels and stat_values must have the same length.")
+        return self
+
+
 class CanonicalLineage(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -332,6 +355,7 @@ RECORD_TYPES: dict[str, type[CanonicalRecord]] = {
         PaperRecommendation,
         Outcome,
         AvailabilityReport,
+        PlayerGameStatline,
     )
 }
 Migration = Callable[[dict[str, Any]], dict[str, Any]]
