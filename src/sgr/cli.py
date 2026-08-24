@@ -16,6 +16,7 @@ from sgr.connectors import KalshiConnector
 from sgr.connectors.espn import EspnConnector
 from sgr.research.evaluation import run_walk_forward_evaluation
 from sgr.research.historical import SeasonCoverageError, ingest_regular_season
+from sgr.research.holdout_backtest import DEFAULT_HOLDOUT_FRACTION, DEFAULT_HOLDOUT_SEED, run_holdout_backtest
 from sgr.research.player_backfill import backfill_boxscores
 from sgr.research.player_impact_evaluation import evaluate_player_impact_on_missing_starters
 from sgr.research.storage import ResearchStore
@@ -257,6 +258,50 @@ def evaluate_player_impact(
             console.print(f"Samples by category: {report.position_sample_counts}")
 
     asyncio.run(_run())
+
+
+@app.command()
+def holdout_backtest(
+    seasons: list[int] = typer.Option(..., "--season", help="Completed season year to evaluate; repeat for multiple"),
+    holdout_fraction: float = typer.Option(DEFAULT_HOLDOUT_FRACTION, help="Fraction of games to show a scorecard row for"),
+    seed: int = typer.Option(DEFAULT_HOLDOUT_SEED, help="Random seed for holdout selection (reproducible reruns)"),
+    limit: int = typer.Option(0, help="Print at most this many scorecard rows (0 = all)"),
+) -> None:
+    """Predicted-vs-actual scorecard for a reproducible holdout sample of real games (SUD-103)."""
+    store = ResearchStore()
+    report = run_holdout_backtest(store, seasons, holdout_fraction=holdout_fraction, seed=seed)
+
+    console.print(
+        "[dim]Note: the model has no free parameters fit per run, so 'holdout' here controls which "
+        "games get a scorecard row -- every game's forecast already only uses strictly-prior data, "
+        "on either side of the split.[/dim]"
+    )
+
+    rows_to_show = report.rows if limit <= 0 else report.rows[:limit]
+    scorecard = Table(title=f"Holdout scorecard ({report.holdout_game_count}/{report.full_game_count} games, seed={report.seed})")
+    scorecard.add_column("Wk")
+    scorecard.add_column("Matchup")
+    scorecard.add_column("Predicted (home win)")
+    scorecard.add_column("Actual")
+    scorecard.add_column("Correct")
+    for row in rows_to_show:
+        scorecard.add_row(
+            str(row.week),
+            f"{row.away_team} @ {row.home_team}",
+            f"{row.predicted_home_win_probability:.1%}",
+            "home" if row.actual_home_win else "away",
+            "[green]yes[/green]" if row.correct else "[red]no[/red]",
+        )
+    console.print(scorecard)
+
+    summary = Table(title="Holdout vs. full-set metrics")
+    summary.add_column("Metric")
+    summary.add_column(f"Holdout (n={report.holdout_game_count})")
+    summary.add_column(f"Full set (n={report.full_game_count})")
+    summary.add_row("Brier score", f"{report.holdout_brier:.4f}" if report.holdout_brier is not None else "-", f"{report.full_brier:.4f}" if report.full_brier is not None else "-")
+    summary.add_row("Log loss", f"{report.holdout_log_loss:.4f}" if report.holdout_log_loss is not None else "-", f"{report.full_log_loss:.4f}" if report.full_log_loss is not None else "-")
+    summary.add_row("Accuracy", f"{report.holdout_accuracy:.1%}" if report.holdout_accuracy is not None else "-", f"{report.full_accuracy:.1%}" if report.full_accuracy is not None else "-")
+    console.print(summary)
 
 
 if __name__ == "__main__":
