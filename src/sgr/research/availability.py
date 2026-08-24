@@ -59,9 +59,12 @@ def confirmation_status(
 ) -> ConfirmationStatus:
     """Predeclared confirmation policy for one player's availability as of `as_of`.
 
-    Only reports with event_time <= as_of and a non-retracted
-    correction_state are considered -- a retraction removes a report from
-    consideration entirely, not just flags it.
+    Only reports with event_time <= as_of AND retrieved_at <= as_of, with a
+    non-retracted correction_state, are considered -- a report whose
+    claimed event_time is early but that wasn't actually retrieved until
+    after `as_of` still cannot count, since it wasn't knowable at decision
+    time. A retraction removes a report from consideration entirely, not
+    just flags it.
 
     Rules, in order:
     1. No eligible reports at all -> TENTATIVE (nothing to act on).
@@ -79,7 +82,7 @@ def confirmation_status(
     eligible = [
         r
         for r in reports
-        if r.event_time <= as_of and r.correction_state != AvailabilityCorrectionState.RETRACTED
+        if r.event_time <= as_of and r.retrieved_at <= as_of and r.correction_state != AvailabilityCorrectionState.RETRACTED
     ]
     if not eligible:
         return ConfirmationStatus.TENTATIVE
