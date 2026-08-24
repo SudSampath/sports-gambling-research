@@ -16,6 +16,7 @@ from sgr.connectors import KalshiConnector
 from sgr.connectors.espn import EspnConnector
 from sgr.research.evaluation import run_walk_forward_evaluation
 from sgr.research.historical import SeasonCoverageError, ingest_regular_season
+from sgr.research.player_backfill import backfill_boxscores
 from sgr.research.storage import ResearchStore
 
 app = typer.Typer(help="Sports gambling research CLI")
@@ -194,6 +195,33 @@ def evaluate_pythagorean(
         )
     console.print(by_season)
     console.print(f"dataset checksum: {report.dataset_checksum[:16]}  seed: {report.random_seed}")
+
+
+@app.command()
+def backfill_player_boxscores(
+    seasons: list[int] = typer.Option(..., "--season", help="Season year to backfill; repeat for multiple"),
+    refresh: bool = typer.Option(False, help="Bypass the cache and refetch every game from ESPN"),
+) -> None:
+    """Backfill player box scores for completed regular-season games (SUD-93)."""
+
+    async def _run() -> None:
+        connector = EspnConnector()
+        store = ResearchStore()
+        report = await backfill_boxscores(connector, store, seasons, refresh=refresh)
+
+        table = Table(title="Box score backfill")
+        table.add_column("Field")
+        table.add_column("Value")
+        table.add_row("Seasons", ", ".join(str(y) for y in report.season_years))
+        table.add_row("Games considered", str(report.games_considered))
+        table.add_row("Games with statlines", str(report.games_with_statlines))
+        table.add_row("Statlines written", str(report.statlines_written))
+        table.add_row("Games with zero statlines", str(len(report.games_with_zero_statlines)))
+        console.print(table)
+        if report.games_with_zero_statlines:
+            console.print(f"[yellow]Zero-statline event IDs: {list(report.games_with_zero_statlines)}[/yellow]")
+
+    asyncio.run(_run())
 
 
 if __name__ == "__main__":
