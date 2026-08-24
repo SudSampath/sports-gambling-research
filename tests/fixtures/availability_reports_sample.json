@@ -1,0 +1,52 @@
+[
+  {
+    "entity_type": "availability_report",
+    "id": "availability_report:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "provider_ids": {"sample-provider": "rpt-001"},
+    "event_time": "2026-09-10T22:00:00+00:00",
+    "retrieved_at": "2026-09-10T22:05:00+00:00",
+    "source_snapshots": [
+      {
+        "provider": "sample-provider",
+        "path": "raw/sample-provider/2026-09-10/rpt-001.json",
+        "source_url": "https://example-provider.test/injuries/rpt-001",
+        "retrieved_at": "2026-09-10T22:05:00+00:00",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    ],
+    "schema_version": "1.0.0",
+    "player_id": "player:test-001",
+    "team_id": "team:test-buf",
+    "game_id": "game:test-week1",
+    "report_class": "gameday_inactive",
+    "status_text": "Inactive",
+    "description": "Did not dress for warmups; listed on the official inactive report.",
+    "source_confidence": "1",
+    "correction_state": "original"
+  },
+  {
+    "entity_type": "availability_report",
+    "id": "availability_report:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "provider_ids": {"sample-provider": "rpt-002"},
+    "event_time": "2026-09-10T20:00:00+00:00",
+    "retrieved_at": "2026-09-10T20:05:00+00:00",
+    "source_snapshots": [
+      {
+        "provider": "sample-provider",
+        "path": "raw/sample-provider/2026-09-10/rpt-002.json",
+        "source_url": "https://example-provider.test/injuries/rpt-002",
+        "retrieved_at": "2026-09-10T20:05:00+00:00",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    ],
+    "schema_version": "1.0.0",
+    "player_id": "player:test-002",
+    "team_id": "team:test-mia",
+    "game_id": "game:test-week1",
+    "report_class": "in_game_incident",
+    "status_text": "Questionable to return",
+    "description": "Left the field briefly after a broadcast-noted lower-body injury; single unconfirmed observation.",
+    "source_confidence": "0.4",
+    "correction_state": "original"
+  }
+]

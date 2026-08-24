@@ -235,6 +235,43 @@ class Outcome(CanonicalRecord):
     market_payout_dollars: Decimal = Field(ge=0, le=1)
 
 
+class AvailabilityReportClass(StrEnum):
+    """Kept as five distinct values rather than folded together: each has a
+    different authority level, latency, and reversal risk (SUD-60)."""
+
+    ROSTER_STATUS = "roster_status"  # Active/Inactive/Injured Reserve/etc.
+    INJURY_STATUS = "injury_status"  # Probable/Questionable/Doubtful/Out
+    PRACTICE_PARTICIPATION = "practice_participation"  # DNP/limited/full
+    GAMEDAY_INACTIVE = "gameday_inactive"  # official pregame inactive list
+    IN_GAME_INCIDENT = "in_game_incident"  # broadcast/injury-timeout mention
+
+
+class AvailabilityCorrectionState(StrEnum):
+    ORIGINAL = "original"
+    CORRECTED = "corrected"
+    RETRACTED = "retracted"
+
+
+class AvailabilityReport(CanonicalRecord):
+    """A single provider-neutral observation of a player's availability.
+
+    event_time is this report's own publish time (there is no other
+    "event" a status report is about), keeping this entity consistent with
+    every other CanonicalRecord rather than adding a duplicate timestamp
+    field for the same concept.
+    """
+
+    entity_type: Literal["availability_report"] = "availability_report"
+    player_id: str = Field(min_length=1)
+    team_id: str
+    game_id: str
+    report_class: AvailabilityReportClass
+    status_text: str = Field(min_length=1)
+    description: str | None = None
+    source_confidence: Decimal = Field(ge=0, le=1)
+    correction_state: AvailabilityCorrectionState = AvailabilityCorrectionState.ORIGINAL
+
+
 class CanonicalLineage(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -294,6 +331,7 @@ RECORD_TYPES: dict[str, type[CanonicalRecord]] = {
         MatchDecision,
         PaperRecommendation,
         Outcome,
+        AvailabilityReport,
     )
 }
 Migration = Callable[[dict[str, Any]], dict[str, Any]]

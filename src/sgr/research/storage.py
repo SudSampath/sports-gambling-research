@@ -31,6 +31,7 @@ TABLES = {
     "match_decision": "match_decisions",
     "paper_recommendation": "paper_recommendations",
     "outcome": "outcomes",
+    "availability_report": "availability_reports",
 }
 
 
