@@ -13,6 +13,9 @@ from sgr.algorithms import MomentumStrategy, ValueStrategy
 from sgr.backtest import run_binary_backtest
 from sgr.config import ConfigurationError
 from sgr.connectors import KalshiConnector
+from sgr.connectors.espn import EspnConnector
+from sgr.research.historical import SeasonCoverageError, ingest_regular_season
+from sgr.research.storage import ResearchStore
 
 app = typer.Typer(help="Sports gambling research CLI")
 console = Console()
@@ -102,6 +105,46 @@ def kalshi_markets(limit: int = 10) -> None:
         console.print(table)
 
     _run_configured_command(_run)
+
+
+@app.command()
+def ingest_historical_seasons(
+    seasons: list[int] = typer.Option(..., "--season", help="Season year; repeat for multiple, e.g. --season 2023 --season 2024"),
+    current_season: int | None = typer.Option(None, help="Season year to ingest as a schedule-only pass (completion not required)"),
+    refresh: bool = typer.Option(False, help="Bypass the cache and refetch every week from ESPN"),
+) -> None:
+    """Ingest regular-season NFL games into local canonical storage (SUD-35)."""
+
+    async def _run() -> None:
+        connector = EspnConnector()
+        store = ResearchStore()
+        table = Table(title="Historical season ingest")
+        table.add_column("Season")
+        table.add_column("Games")
+        table.add_column("Teams")
+        table.add_column("Result")
+
+        plan = [(year, True) for year in seasons]
+        if current_season is not None:
+            plan.append((current_season, False))
+
+        for year, require_completed in plan:
+            try:
+                report = await ingest_regular_season(
+                    connector, store, year, require_completed=require_completed, refresh=refresh
+                )
+                table.add_row(str(year), f"{report.games_captured}/{report.games_expected}", f"{report.teams_captured}/{report.teams_expected}", "[green]complete[/green]")
+            except SeasonCoverageError as error:
+                report = error.report
+                table.add_row(
+                    str(year),
+                    f"{report.games_captured}/{report.games_expected}",
+                    f"{report.teams_captured}/{report.teams_expected}",
+                    f"[red]failed: {error}[/red]",
+                )
+        console.print(table)
+
+    asyncio.run(_run())
 
 
 if __name__ == "__main__":
