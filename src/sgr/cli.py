@@ -17,6 +17,7 @@ from sgr.connectors.espn import EspnConnector
 from sgr.research.evaluation import run_walk_forward_evaluation
 from sgr.research.historical import SeasonCoverageError, ingest_regular_season
 from sgr.research.player_backfill import backfill_boxscores
+from sgr.research.player_impact_evaluation import evaluate_player_impact_on_missing_starters
 from sgr.research.storage import ResearchStore
 
 app = typer.Typer(help="Sports gambling research CLI")
@@ -220,6 +221,40 @@ def backfill_player_boxscores(
         console.print(table)
         if report.games_with_zero_statlines:
             console.print(f"[yellow]Zero-statline event IDs: {list(report.games_with_zero_statlines)}[/yellow]")
+
+    asyncio.run(_run())
+
+
+@app.command()
+def evaluate_player_impact(
+    seasons: list[int] = typer.Option(..., "--season", help="Completed season year to evaluate; repeat for multiple"),
+) -> None:
+    """Walk-forward evaluate the player-impact adjustment on games with a missing usual starter (SUD-62)."""
+
+    async def _run() -> None:
+        store = ResearchStore()
+        report = await evaluate_player_impact_on_missing_starters(store, seasons)
+
+        summary = Table(title="Player impact evaluation (missing-starter games)")
+        summary.add_column("Field")
+        summary.add_column("Value")
+        summary.add_row("Seasons", ", ".join(str(y) for y in report.season_years))
+        summary.add_row("Games considered", str(report.games_considered))
+        summary.add_row("Games with missing starters", str(report.games_with_missing_starters))
+        summary.add_row("Missing-starter samples", str(len(report.samples)))
+        summary.add_row(
+            "Baseline Brier / Log loss",
+            f"{report.baseline_brier:.4f} / {report.baseline_log_loss:.4f}"
+            if report.baseline_brier is not None else "-",
+        )
+        summary.add_row(
+            "Adjusted Brier / Log loss",
+            f"{report.adjusted_brier:.4f} / {report.adjusted_log_loss:.4f}"
+            if report.adjusted_brier is not None else "-",
+        )
+        console.print(summary)
+        if report.position_sample_counts:
+            console.print(f"Samples by category: {report.position_sample_counts}")
 
     asyncio.run(_run())
 
