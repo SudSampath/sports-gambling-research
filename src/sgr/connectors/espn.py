@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from sgr.connectors.base import APIConnector
+from sgr.connectors.base import APIConnector, APIRequestError
 from sgr.models import NFLGame, NFLSeasonType, NFLTeam
 
 
@@ -146,6 +146,8 @@ class EspnConnector(APIConnector):
         source_url = self._source_url(params)
         try:
             payload = await self.get_json("scoreboard", params=params)
+        except APIRequestError as error:
+            raise EspnRequestError(f"ESPN scoreboard request failed: {error}") from error
         except httpx.HTTPStatusError as error:
             status = error.response.status_code if error.response is not None else "unknown"
             raise EspnRequestError(f"ESPN scoreboard request failed with HTTP status {status}.") from error

@@ -158,3 +158,19 @@ def test_network_failure_is_typed_and_never_fabricates_data(tmp_path, monkeypatc
 
     with pytest.raises(EspnRequestError, match="checking connectivity"):
         asyncio.run(connector.games_for_date(GAME_DATE, refresh=True))
+
+
+def test_real_http_status_failure_is_typed_through_the_base_connector(tmp_path, monkeypatch):
+    """Exercises APIConnector.get_json for real, rather than mocking it away,
+    so a status failure must cross the actual base-to-espn error boundary."""
+    connector = EspnConnector(cache_dir=tmp_path)
+    request = httpx.Request("GET", SOURCE_URL)
+    failure_response = httpx.Response(503, request=request)
+
+    async def fake_get(self, url, params=None, headers=None, **kwargs):
+        return failure_response
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    with pytest.raises(EspnRequestError, match="HTTP status 503"):
+        asyncio.run(connector.games_for_date(GAME_DATE, refresh=True))
