@@ -165,6 +165,7 @@ def _examples() -> dict[str, object]:
             away_shrinkage_weight=Decimal("0.6"),
             training_window_start=retrieved,
             home_field_applied=True,
+            calibration_version="uncalibrated-v1",
         ),
         MatchDecision(
             id=decision_id,

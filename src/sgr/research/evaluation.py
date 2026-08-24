@@ -120,7 +120,7 @@ def _win_pct_strength(
         )
         return wins / len(games)
 
-    blended, _ = shrink_toward_prior(_win_pct(current), current_n, _win_pct(prior), prior_n)
+    blended, _ = shrink_toward_prior(_win_pct(current), current_n, _win_pct(prior))
     return blended, current_n, prior_n
 
 

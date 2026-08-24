@@ -178,6 +178,8 @@ class Forecast(CanonicalRecord):
     away_shrinkage_weight: Decimal = Field(ge=0, le=1)
     training_window_start: datetime
     home_field_applied: bool
+    calibration_version: str = Field(min_length=1)
+    abstained: bool = False
 
     @model_validator(mode="after")
     def probabilities_are_coherent(self) -> Forecast:
