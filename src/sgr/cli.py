@@ -20,6 +20,7 @@ from sgr.research.holdout_backtest import DEFAULT_HOLDOUT_FRACTION, DEFAULT_HOLD
 from sgr.research.player_backfill import backfill_boxscores
 from sgr.research.player_impact_evaluation import evaluate_player_impact_on_missing_starters
 from sgr.research.storage import ResearchStore
+from sgr.research.win_totals import project_season_win_totals
 
 app = typer.Typer(help="Sports gambling research CLI")
 console = Console()
@@ -302,6 +303,38 @@ def holdout_backtest(
     summary.add_row("Log loss", f"{report.holdout_log_loss:.4f}" if report.holdout_log_loss is not None else "-", f"{report.full_log_loss:.4f}" if report.full_log_loss is not None else "-")
     summary.add_row("Accuracy", f"{report.holdout_accuracy:.1%}" if report.holdout_accuracy is not None else "-", f"{report.full_accuracy:.1%}" if report.full_accuracy is not None else "-")
     console.print(summary)
+
+
+@app.command()
+def project_win_totals(
+    season: int = typer.Option(..., help="Season year to project"),
+    as_of: datetime = typer.Option(
+        None, help="Point-in-time cutoff (ISO 8601, UTC); defaults to now"
+    ),
+) -> None:
+    """Each team's projected win total: exact expectation plus a variance-based
+    confidence band, no simulation (SUD-104)."""
+    store = ResearchStore()
+    cutoff = as_of.replace(tzinfo=timezone.utc) if as_of and as_of.tzinfo is None else (as_of or datetime.now(timezone.utc))
+    report = project_season_win_totals(store, season, as_of=cutoff)
+
+    table = Table(title=f"Season {report.season_year} win-total projections (as of {report.as_of.isoformat()})")
+    table.add_column("Team")
+    table.add_column("Record so far")
+    table.add_column("Games left")
+    table.add_column("Exp. additional wins")
+    table.add_column("Exp. total wins")
+    table.add_column("~68% range")
+    for p in report.projections:
+        table.add_row(
+            p.abbreviation,
+            f"{p.wins_so_far:g} / {p.games_played}",
+            str(p.games_remaining),
+            f"{p.expected_additional_wins:.2f}",
+            f"{p.expected_total_wins:.2f}",
+            f"{p.confidence_low:.1f}-{p.confidence_high:.1f}",
+        )
+    console.print(table)
 
 
 if __name__ == "__main__":
