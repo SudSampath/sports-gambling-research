@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from sgr.models import NFLSeasonType
-from sgr.research.schemas import Forecast, Game, stable_record_id
+from sgr.research.schemas import AvailabilityReport, Forecast, Game, PlayerGameStatline, stable_record_id
 from sgr.research.storage import ResearchStore
 
 MODEL_VERSION = "pythagorean-v1"
@@ -313,6 +313,29 @@ def apply_home_field(raw_home_win_probability: float, *, neutral_site: bool) -> 
     return sigmoid(z)
 
 
+# Process-lifetime cache for the injury-adjustment inputs, keyed by a
+# ResearchStore instance's id(). generate_forecast is frequently called
+# hundreds of times in one process (a season simulation, a win-totals
+# report) with apply_injury_adjustment left at its default; without this,
+# every one of those calls re-queries and re-parses the full
+# player_game_statline table (tens of thousands of rows) from scratch. This
+# assumes the underlying tables do not change during one process's
+# lifetime -- true for the CLI/report-generation tools that are the only
+# current source of high-volume generate_forecast calls, not a general
+# guarantee for a long-running server.
+_INJURY_INPUTS_CACHE: dict[int, tuple[list[PlayerGameStatline], list[AvailabilityReport]]] = {}
+
+
+def _cached_injury_inputs(store: ResearchStore) -> tuple[list[PlayerGameStatline], list[AvailabilityReport]]:
+    cached = _INJURY_INPUTS_CACHE.get(id(store))
+    if cached is not None:
+        return cached
+    statlines = [s for s in store.load_all("player_game_statline") if isinstance(s, PlayerGameStatline)]
+    availability_reports = [r for r in store.load_all("availability_report") if isinstance(r, AvailabilityReport)]
+    _INJURY_INPUTS_CACHE[id(store)] = (statlines, availability_reports)
+    return statlines, availability_reports
+
+
 def generate_forecast(
     store: ResearchStore,
     game_id: str,
@@ -363,21 +386,9 @@ def generate_forecast(
         # InvalidScoringInputError from this module, so a top-of-file import
         # here would be circular.
         from sgr.research.injury_adjustment import compute_injury_adjustment
-        from sgr.research.schemas import AvailabilityReport, PlayerGameStatline
 
-        # Cheap short-circuit: check availability_report (usually empty --
-        # this project never backfills it against historical games, see
-        # injury_ingest.py) before paying for a full player_game_statline
-        # load (tens of thousands of rows). With no availability data at
-        # all, no player can possibly resolve to OUT/INACTIVE, so there is
-        # nothing compute_injury_adjustment could do; skipping the statline
-        # load here keeps every historical walk-forward call at its
-        # pre-SUD-109 cost.
-        all_availability_reports = [
-            r for r in store.load_all("availability_report") if isinstance(r, AvailabilityReport)
-        ]
+        all_statlines, all_availability_reports = _cached_injury_inputs(store)
         if all_availability_reports:
-            all_statlines = [s for s in store.load_all("player_game_statline") if isinstance(s, PlayerGameStatline)]
             injury_result = compute_injury_adjustment(
                 store, all_games, all_statlines, all_availability_reports,
                 game.home_team_id, game.away_team_id, game.season_year, feature_cutoff_at,
