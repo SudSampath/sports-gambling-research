@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 import pytest
 
@@ -17,6 +18,7 @@ from sgr.research.pythagorean import (
     generate_forecast,
     pythagorean_win_pct,
 )
+from sgr.research.schemas import AvailabilityReport, AvailabilityReportClass, RawSnapshotRef, stable_record_id
 from sgr.research.storage import ResearchStore
 
 from _game_factory import make_game, team_id
@@ -361,3 +363,64 @@ def test_generate_forecast_excludes_espn_predictor_and_odds_fields(tmp_path):
     )
     fields = set(forecast.model_dump())
     assert fields.isdisjoint({"odds", "predictor", "win_probability", "kalshi_price"})
+
+
+def test_injury_adjustment_inputs_are_loaded_once_per_store_not_once_per_call(tmp_path, monkeypatch):
+    """generate_forecast is routinely called hundreds of times in one process
+    (a season simulation, a win-totals report) with apply_injury_adjustment
+    left at its default. Before caching, each call re-queried and
+    re-parsed the full player_game_statline table (tens of thousands of
+    rows in production) from scratch -- fine for one call, but this
+    measurably hung real report generation once real availability data
+    existed (SUD-109's own short-circuit only helps when that table is
+    empty). Asserts the fix: repeated calls on the same store reuse one
+    load rather than paying for it every time.
+    """
+    store = ResearchStore(root=tmp_path / "store")
+    _seed_two_teams(store, home="BUF", away="MIA", season_year=2025)
+    source = RawSnapshotRef(
+        provider="espn", path="raw/x.json", source_url="https://example.test/x",
+        retrieved_at=_week(1), sha256="0" * 64,
+    )
+    # One real availability report is enough to take the code path that
+    # used to reload the statline table -- it does not need to actually
+    # resolve to OUT for this performance characteristic to matter.
+    store.write(
+        [
+            AvailabilityReport(
+                id=stable_record_id("availability_report", "espn", "someone", _week(1).isoformat()),
+                provider_ids={"espn": "someone"},
+                event_time=_week(1),
+                retrieved_at=_week(1),
+                source_snapshots=(source,),
+                player_id=stable_record_id("player", "espn", "someone"),
+                team_id=team_id("BUF"),
+                game_id=stable_record_id("game", "espn", "BUF-hist-1"),
+                report_class=AvailabilityReportClass.INJURY_STATUS,
+                status_text="Questionable",
+                source_confidence=Decimal("0.6"),
+            )
+        ]
+    )
+
+    call_counts: dict[str, int] = {}
+    original_load_all = ResearchStore.load_all
+
+    def counting_load_all(self, entity_type):
+        call_counts[entity_type] = call_counts.get(entity_type, 0) + 1
+        return original_load_all(self, entity_type)
+
+    monkeypatch.setattr(ResearchStore, "load_all", counting_load_all)
+
+    cutoff = _week(6) - timedelta(hours=1)
+    for i in range(5):
+        matchup = make_game(
+            event_id=f"matchup-cache-{i}", season_year=2025, week=6, home_abbr="BUF", away_abbr="MIA",
+            kickoff_at=_week(6), home_score=None, away_score=None, completed=False,
+        )
+        store.write([matchup])
+        forecast = generate_forecast(store, matchup.id, feature_cutoff_at=cutoff)
+        assert 0.0 <= float(forecast.home_win_probability) <= 1.0
+
+    assert call_counts.get("player_game_statline", 0) == 1
+    assert call_counts.get("availability_report", 0) == 1
