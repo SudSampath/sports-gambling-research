@@ -9,6 +9,7 @@ from sgr.research.pythagorean import (
     DEFAULT_EXPONENT,
     InsufficientHistoryError,
     apply_home_field,
+    blended_points_per_game,
     combine_win_probabilities_log5,
     compute_team_strength,
     pythagorean_win_pct,
@@ -185,15 +186,6 @@ def points_per_production_unit(statlines: list[PlayerGameStatline], games: list[
     return total_points / total_production
 
 
-def _blended_points_per_game(
-    current_points: int, current_games: int, prior_points: int, prior_games: int
-) -> float | None:
-    current_ppg = current_points / current_games if current_games else None
-    prior_ppg = prior_points / prior_games if prior_games else None
-    blended, _ = shrink_toward_prior(current_ppg, current_games, prior_ppg)
-    return blended
-
-
 @dataclass(frozen=True)
 class PlayerImpactEstimate:
     player_id: str
@@ -263,19 +255,19 @@ def estimate_player_impact(
     opponent_strength = compute_team_strength(
         games, opponent_team_id, season_year, feature_cutoff_at, exponent=exponent
     )
-    opponent_ppg_for = _blended_points_per_game(
+    opponent_ppg_for = blended_points_per_game(
         opponent_strength.current_points_for, opponent_strength.current_games_played,
         opponent_strength.prior_points_for, opponent_strength.prior_games_played,
     )
-    opponent_ppg_against = _blended_points_per_game(
+    opponent_ppg_against = blended_points_per_game(
         opponent_strength.current_points_against, opponent_strength.current_games_played,
         opponent_strength.prior_points_against, opponent_strength.prior_games_played,
     )
-    team_ppg_for = _blended_points_per_game(
+    team_ppg_for = blended_points_per_game(
         team_strength.current_points_for, team_strength.current_games_played,
         team_strength.prior_points_for, team_strength.prior_games_played,
     )
-    team_ppg_against = _blended_points_per_game(
+    team_ppg_against = blended_points_per_game(
         team_strength.current_points_against, team_strength.current_games_played,
         team_strength.prior_points_against, team_strength.prior_games_played,
     )
