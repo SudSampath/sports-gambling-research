@@ -14,6 +14,7 @@ from sgr.backtest import run_binary_backtest
 from sgr.config import ConfigurationError
 from sgr.connectors import KalshiConnector
 from sgr.connectors.espn import EspnConnector
+from sgr.research.candidate_comparison import run_candidate_comparison
 from sgr.research.evaluation import run_walk_forward_evaluation
 from sgr.research.historical import SeasonCoverageError, ingest_regular_season
 from sgr.research.holdout_backtest import DEFAULT_HOLDOUT_FRACTION, DEFAULT_HOLDOUT_SEED, run_holdout_backtest
@@ -526,6 +527,32 @@ def combined_outcome(
         f"Fair (breakeven) decimal odds: {result.fair_decimal_odds:.2f}"
         if result.fair_decimal_odds is not None else "Fair decimal odds: n/a (probability is zero)"
     )
+
+
+@app.command()
+def compare_candidates(
+    seasons: list[int] = typer.Option(..., "--season", help="Completed season year to evaluate; repeat for multiple"),
+) -> None:
+    """Walk-forward compare baseline vs. injuries/turnover/SOS individually
+    and blended together, on the same held-out real games (SUD-111)."""
+    store = ResearchStore()
+    report = run_candidate_comparison(store, seasons)
+
+    table = Table(title=f"Candidate comparison ({', '.join(str(y) for y in report.season_years)})")
+    table.add_column("Configuration")
+    table.add_column("N")
+    table.add_column("Brier")
+    table.add_column("Log loss")
+    table.add_column("Accuracy")
+    for name, m in report.results.items():
+        table.add_row(
+            name,
+            str(m.sample_count),
+            f"{m.brier_score:.4f}" if m.brier_score is not None else "-",
+            f"{m.log_loss:.4f}" if m.log_loss is not None else "-",
+            f"{m.accuracy:.1%}" if m.accuracy is not None else "-",
+        )
+    console.print(table)
 
 
 if __name__ == "__main__":
