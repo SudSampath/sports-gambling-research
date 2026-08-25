@@ -17,6 +17,8 @@ from sgr.connectors.espn import EspnConnector
 from sgr.research.evaluation import run_walk_forward_evaluation
 from sgr.research.historical import SeasonCoverageError, ingest_regular_season
 from sgr.research.holdout_backtest import DEFAULT_HOLDOUT_FRACTION, DEFAULT_HOLDOUT_SEED, run_holdout_backtest
+from sgr.research.margin import DEFAULT_HOME_FIELD_MARGIN_POINTS, calibrate_home_field_margin_points
+from sgr.research.margin_evaluation import run_margin_walk_forward_evaluation
 from sgr.research.player_backfill import backfill_boxscores
 from sgr.research.player_impact_evaluation import evaluate_player_impact_on_missing_starters
 from sgr.research.storage import ResearchStore
@@ -198,6 +200,54 @@ def evaluate_pythagorean(
         )
     console.print(by_season)
     console.print(f"dataset checksum: {report.dataset_checksum[:16]}  seed: {report.random_seed}")
+
+
+@app.command()
+def evaluate_margin(
+    seasons: list[int] = typer.Option(..., "--season", help="Completed season year to evaluate; repeat for multiple"),
+    home_field_margin_points: float = typer.Option(
+        DEFAULT_HOME_FIELD_MARGIN_POINTS, help="Home-field margin term (points); see calibrate-home-field-margin"
+    ),
+) -> None:
+    """Walk-forward evaluate expected-margin predictions against actual final margins (SUD-105)."""
+    store = ResearchStore()
+    report = run_margin_walk_forward_evaluation(store, seasons, home_field_margin_points=home_field_margin_points)
+
+    summary = Table(title=f"Margin walk-forward evaluation ({report.model_version}, home-field={report.home_field_margin_points:.2f}pt)")
+    summary.add_column("Model")
+    summary.add_column("N")
+    summary.add_column("MAE")
+    summary.add_column("RMSE")
+    summary.add_row(
+        "expected margin",
+        str(report.overall.sample_count),
+        f"{report.overall.mean_absolute_error:.2f}" if report.overall.mean_absolute_error is not None else "-",
+        f"{report.overall.root_mean_squared_error:.2f}" if report.overall.root_mean_squared_error is not None else "-",
+    )
+    for name, metrics in report.baseline_overall.items():
+        summary.add_row(
+            name,
+            str(metrics.sample_count),
+            f"{metrics.mean_absolute_error:.2f}" if metrics.mean_absolute_error is not None else "-",
+            f"{metrics.root_mean_squared_error:.2f}" if metrics.root_mean_squared_error is not None else "-",
+        )
+    console.print(summary)
+    console.print(
+        f"residual stdev (for a margin confidence interval): "
+        f"{report.overall.residual_stdev:.2f}pt"
+        if report.overall.residual_stdev is not None else "residual stdev: -"
+    )
+    console.print(f"dataset checksum: {report.dataset_checksum[:16]}")
+
+
+@app.command()
+def calibrate_home_field_margin(
+    seasons: list[int] = typer.Option(..., "--season", help="Completed training season year; repeat for multiple"),
+) -> None:
+    """Fit the home-field margin term from real completed games (SUD-105)."""
+    store = ResearchStore()
+    calibrated = calibrate_home_field_margin_points(store, seasons)
+    console.print(f"Calibrated home-field margin term: {calibrated:.4f} points (training seasons: {seasons})")
 
 
 @app.command()

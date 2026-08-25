@@ -168,6 +168,20 @@ def shrink_toward_prior(
     return weight * current_value + (1 - weight) * prior_value, weight
 
 
+def blended_points_per_game(
+    current_points: int, current_games: int, prior_points: int, prior_games: int
+) -> float | None:
+    """Shrink a team's current-season points-for-or-against per game toward
+    its prior-season rate, via the same shrink_toward_prior primitive
+    compute_team_strength uses internally. Exposed as a standalone helper so
+    other modules needing the same blended PF/PA (e.g. player_impact.py,
+    margin.py) reuse this rather than re-deriving it."""
+    current_ppg = current_points / current_games if current_games else None
+    prior_ppg = prior_points / prior_games if prior_games else None
+    blended, _ = shrink_toward_prior(current_ppg, current_games, prior_ppg)
+    return blended
+
+
 def team_games(games: list[Game], team_id: str) -> list[Game]:
     return [g for g in games if g.home_team_id == team_id or g.away_team_id == team_id]
 
