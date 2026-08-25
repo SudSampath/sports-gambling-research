@@ -23,6 +23,7 @@ from sgr.research.pythagorean import (
     shrink_toward_prior,
 )
 from sgr.research.schemas import Game, PlayerGameStatline
+from sgr.research.sos_adjustment import compute_all_team_strengths, sos_adjusted_probability
 from sgr.research.storage import ResearchStore
 from sgr.research.turnover_adjustment import build_turnovers_committed_index, turnover_normalized_probability
 
@@ -320,6 +321,7 @@ def run_walk_forward_evaluation(
         "prior_win_pct": [],
         "raw_pythagorean": [],
         "turnover_normalized": [],
+        "sos_adjusted": [],
     }
 
     for game in test_games:
@@ -344,6 +346,11 @@ def run_walk_forward_evaluation(
             )
 
         if include_baselines:
+            # Computed fresh per game: unlike turnovers_index (a fixed
+            # historical index), team strength depends on season_year and
+            # this game's own cutoff, both of which vary game to game in a
+            # chronological walk-forward.
+            team_strengths = compute_all_team_strengths(all_games, game.season_year, cutoff, exponent=exponent)
             for name, fn in (
                 (
                     "home_field_only",
@@ -367,6 +374,13 @@ def run_walk_forward_evaluation(
                     "turnover_normalized",
                     lambda: turnover_normalized_probability(
                         all_games, turnovers_index, game.home_team_id, game.away_team_id, game.season_year,
+                        cutoff, neutral_site=game.neutral_site, exponent=exponent,
+                    ),
+                ),
+                (
+                    "sos_adjusted",
+                    lambda: sos_adjusted_probability(
+                        all_games, team_strengths, game.home_team_id, game.away_team_id, game.season_year,
                         cutoff, neutral_site=game.neutral_site, exponent=exponent,
                     ),
                 ),

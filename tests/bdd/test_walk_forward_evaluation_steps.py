@@ -128,7 +128,7 @@ def exclusion_reasons_listed(evaluation_context):
 def baselines_reported(evaluation_context):
     report = evaluation_context["result"]
     assert set(report.baseline_overall) == {
-        "home_field_only", "prior_win_pct", "raw_pythagorean", "turnover_normalized",
+        "home_field_only", "prior_win_pct", "raw_pythagorean", "turnover_normalized", "sos_adjusted",
     }
 
 
