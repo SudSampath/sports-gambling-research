@@ -97,6 +97,37 @@ class PlayerUsage:
         return self.total_production / self.games_played if self.games_played else 0.0
 
 
+# How many prior games a player must have logged in their empirically
+# dominant category before being treated as a team's "usual starter" for
+# that category -- below this, a small early-season sample shouldn't crown
+# someone the starter yet.
+MINIMUM_PRIOR_GAMES_TO_BE_A_STARTER = 3
+
+
+def usual_starters(usages_by_team: dict[str, list[PlayerUsage]], minimum_prior_games: int) -> dict[str, set[str]]:
+    """Players considered "usual starters" for a team as of a cutoff: the
+    team's top user of a production category (compute_player_usages'
+    primary_category), provided they've played at least minimum_prior_games.
+
+    Shared by the missing-starter evaluation harness (player_impact_evaluation.py)
+    and the live injury-aware forecast adjustment (injury_adjustment.py) --
+    both need the same definition of "starter" for their results to be
+    comparable.
+    """
+    starters: dict[str, set[str]] = {}
+    for team_id, usages in usages_by_team.items():
+        by_category: dict[str, list[PlayerUsage]] = {}
+        for usage in usages:
+            by_category.setdefault(usage.primary_category, []).append(usage)
+        team_starters = set()
+        for category, group in by_category.items():
+            top = max(group, key=lambda u: u.total_production)
+            if top.games_played >= minimum_prior_games:
+                team_starters.add(top.player_id)
+        starters[team_id] = team_starters
+    return starters
+
+
 def compute_player_usages(
     statlines: list[PlayerGameStatline],
     games_by_id: dict[str, Game],
