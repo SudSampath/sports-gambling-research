@@ -177,7 +177,9 @@ def test_baselines_are_included_and_distinct_from_the_model(tmp_path):
     store = ResearchStore(root=tmp_path / "store")
     _seed_two_seasons(store)
     report = run_walk_forward_evaluation(store, [2024])
-    assert set(report.baseline_overall) == {"home_field_only", "prior_win_pct", "raw_pythagorean"}
+    assert set(report.baseline_overall) == {
+        "home_field_only", "prior_win_pct", "raw_pythagorean", "turnover_normalized",
+    }
     for metric_set in report.baseline_overall.values():
         assert metric_set.brier_score is not None
 
