@@ -9,6 +9,26 @@ A public, research-only Python project for evaluating NFL event-market signals. 
 - Backtest using only information available before a simulated decision time; measure calibration, log loss, Brier score, and friction-aware paper-trade performance.
 - Record data provenance, model version, inputs, and rejection reasons so every recommendation can be recreated.
 
+## Model and methodology
+
+The win-probability model is a Pythagorean expectation (`src/sgr/research/pythagorean.py`): each team's strength is `points_for^x / (points_for^x + points_against^x)`, blended toward its prior season early on so a small in-season sample doesn't dominate. Two teams' strengths combine into a win probability via the log5 formula, plus a home-field adjustment. Every forecast is generated from a required, explicit `feature_cutoff_at` and only ever reads games completed strictly before it (`src/sgr/research/evaluation.py` walk-forward evaluates this chronologically, so a rerun with a later cutoff never changes an earlier prediction).
+
+Built on top of that baseline:
+
+- **Win totals** (`win_totals.py`): each team's expected season win total is the exact sum of its per-game win probabilities (linearity of expectation, no simulation), with a variance-based confidence band.
+- **Expected margin** (`margin.py`): a point-spread estimate from the same blended points-for/against, plus a home-field points term calibrated from real data (not assumed).
+- **Season simulation** (`season_simulation.py`): a seeded Monte Carlo simulation for playoff odds, division-win odds, and the joint probability of a user-specified set of outcomes -- reserved for the questions a single team's expected value can't answer.
+- **Player-impact / injuries** (`player_impact.py`, `injury_adjustment.py`): a replacement-aware estimate of a missing usual starter's win-probability impact, wired into every forecast by default. It only fires when a player resolves to a *confirmed* OUT/INACTIVE status from independently corroborating sources (a single uncorroborated report, e.g. from one provider, is treated as unconfirmed and does not trigger it) -- see `injury_ingest.py` for how current injury reports are fetched, always for not-yet-played games only, never backfilled against completed ones (that would misrepresent today's report as having been knowable in the past).
+
+### What was tried and did not help
+
+Two further adjustments were researched, implemented, and walk-forward evaluated against real 2023-2025 data, and are kept in the codebase as documented, tested, but **unused** baselines (`evaluation.py`'s `turnover_normalized` and `sos_adjusted` entries) rather than defaults, because they measurably hurt out-of-sample accuracy:
+
+- **Turnover normalization** (`turnover_adjustment.py`): discounting scoring by a real-data-calibrated points-per-turnover-margin rate. Roughly flat to slightly worse than the unadjusted baseline on held-out 2025 data.
+- **Strength-of-schedule adjustment** (`sos_adjustment.py`): scaling points-for/against by opponent strength relative to the league average. Clearly worse than baseline on held-out 2025 data -- current-season-only opponent samples are too small (often 1-4 games) for the adjustment to separate real signal from noise.
+
+A combined "blend" of injuries + turnover + SOS was also evaluated (`candidate_comparison.py`) and does not beat the injury adjustment alone, since SOS's damage outweighs the other two. See the closed SUD-108/109/110/111 tickets for the full real-data comparison tables and reasoning.
+
 ## Non-goals for the first milestone
 
 - Real-money order submission, modification, cancellation, or settlement.
