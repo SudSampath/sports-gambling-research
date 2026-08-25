@@ -17,6 +17,7 @@ from sgr.connectors.espn import EspnConnector
 from sgr.research.evaluation import run_walk_forward_evaluation
 from sgr.research.historical import SeasonCoverageError, ingest_regular_season
 from sgr.research.holdout_backtest import DEFAULT_HOLDOUT_FRACTION, DEFAULT_HOLDOUT_SEED, run_holdout_backtest
+from sgr.research.injury_ingest import ingest_current_injuries
 from sgr.research.margin import DEFAULT_HOME_FIELD_MARGIN_POINTS, calibrate_home_field_margin_points
 from sgr.research.margin_evaluation import run_margin_walk_forward_evaluation
 from sgr.research.player_backfill import backfill_boxscores
@@ -283,6 +284,30 @@ def backfill_player_boxscores(
         console.print(table)
         if report.games_with_zero_statlines:
             console.print(f"[yellow]Zero-statline event IDs: {list(report.games_with_zero_statlines)}[/yellow]")
+
+    asyncio.run(_run())
+
+
+@app.command(name="ingest-current-injuries")
+def ingest_current_injuries_cmd(
+    season: int = typer.Option(..., "--season", help="Season year"),
+    refresh: bool = typer.Option(False, help="Bypass the cache and refetch from ESPN"),
+) -> None:
+    """Ingest ESPN's current injury report for every not-yet-played game this
+    season (SUD-109). Never touches completed games -- see injury_ingest.py."""
+
+    async def _run() -> None:
+        connector = EspnConnector()
+        store = ResearchStore()
+        report = await ingest_current_injuries(connector, store, season, refresh=refresh)
+
+        table = Table(title=f"Injury report ingest ({report.season_year})")
+        table.add_column("Field")
+        table.add_column("Value")
+        table.add_row("Not-yet-played games considered", str(report.games_considered))
+        table.add_row("Games with injury entries", str(report.games_with_injury_entries))
+        table.add_row("Availability reports written", str(report.reports_written))
+        console.print(table)
 
     asyncio.run(_run())
 

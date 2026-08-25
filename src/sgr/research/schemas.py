@@ -180,6 +180,8 @@ class Forecast(CanonicalRecord):
     home_field_applied: bool
     calibration_version: str = Field(min_length=1)
     abstained: bool = False
+    injury_adjustment: Decimal = Decimal("0")  # net home-win-probability delta applied, signed
+    injury_adjusted_player_ids: tuple[str, ...] = ()  # audit trail: which players triggered it
 
     @model_validator(mode="after")
     def probabilities_are_coherent(self) -> Forecast:

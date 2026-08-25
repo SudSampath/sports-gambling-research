@@ -320,6 +320,7 @@ def generate_forecast(
     feature_cutoff_at: datetime,
     exponent: float = DEFAULT_EXPONENT,
     forecast_created_at: datetime | None = None,
+    apply_injury_adjustment: bool = True,
 ) -> Forecast:
     """Generate and persist a point-in-time Forecast for one game.
 
@@ -329,6 +330,14 @@ def generate_forecast(
     Kalshi price is never read here: this function only ever touches Game
     records, keeping the independent baseline uncontaminated by market price
     per the PRD's ordering rule.
+
+    apply_injury_adjustment (SUD-109) defaults on: it nets in
+    compute_injury_adjustment's delta whenever a usual starter resolves to a
+    confirmed OUT/INACTIVE as of feature_cutoff_at, and is an exact no-op
+    otherwise (including every historical game, since this project
+    deliberately never backfills injury data against completed games --
+    see player_backfill.py). Safe to default on for that reason: it cannot
+    change any already-validated historical walk-forward result.
     """
     game = store.load("game", game_id)
     if not isinstance(game, Game):
@@ -346,6 +355,38 @@ def generate_forecast(
     raw_home_win = combine_win_probabilities_log5(home_strength.strength, away_strength.strength)
     home_field_applied = not bool(game.neutral_site)
     home_win_probability = apply_home_field(raw_home_win, neutral_site=bool(game.neutral_site))
+
+    injury_delta = 0.0
+    injury_adjusted_player_ids: tuple[str, ...] = ()
+    if apply_injury_adjustment:
+        # Local import: injury_adjustment.py imports InsufficientHistoryError/
+        # InvalidScoringInputError from this module, so a top-of-file import
+        # here would be circular.
+        from sgr.research.injury_adjustment import compute_injury_adjustment
+        from sgr.research.schemas import AvailabilityReport, PlayerGameStatline
+
+        # Cheap short-circuit: check availability_report (usually empty --
+        # this project never backfills it against historical games, see
+        # injury_ingest.py) before paying for a full player_game_statline
+        # load (tens of thousands of rows). With no availability data at
+        # all, no player can possibly resolve to OUT/INACTIVE, so there is
+        # nothing compute_injury_adjustment could do; skipping the statline
+        # load here keeps every historical walk-forward call at its
+        # pre-SUD-109 cost.
+        all_availability_reports = [
+            r for r in store.load_all("availability_report") if isinstance(r, AvailabilityReport)
+        ]
+        if all_availability_reports:
+            all_statlines = [s for s in store.load_all("player_game_statline") if isinstance(s, PlayerGameStatline)]
+            injury_result = compute_injury_adjustment(
+                store, all_games, all_statlines, all_availability_reports,
+                game.home_team_id, game.away_team_id, game.season_year, feature_cutoff_at,
+                neutral_site=bool(game.neutral_site), exponent=exponent,
+            )
+            if injury_result.adjustments:
+                home_win_probability = min(max(home_win_probability + injury_result.home_win_probability_delta, 1e-6), 1 - 1e-6)
+                injury_delta = injury_result.home_win_probability_delta
+                injury_adjusted_player_ids = tuple(a.player_id for a in injury_result.adjustments)
 
     min_games_played = min(home_strength.current_games_played, away_strength.current_games_played)
     uncertainty = 1 / math.sqrt(min_games_played + 1)
@@ -377,4 +418,6 @@ def generate_forecast(
         home_field_applied=home_field_applied,
         calibration_version=CALIBRATION_VERSION_UNCALIBRATED,
         abstained=False,
+        injury_adjustment=Decimal(str(round(injury_delta, 6))),
+        injury_adjusted_player_ids=injury_adjusted_player_ids,
     )

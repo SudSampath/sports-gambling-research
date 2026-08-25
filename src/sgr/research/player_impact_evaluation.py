@@ -6,9 +6,11 @@ from datetime import datetime, timedelta, timezone
 from sgr.models import NFLSeasonType
 from sgr.research.evaluation import FEATURE_CUTOFF_HOURS_BEFORE_KICKOFF, GameSample, brier_score, log_loss
 from sgr.research.player_impact import (
+    MINIMUM_PRIOR_GAMES_TO_BE_A_STARTER,
     MissingReplacementError,
     compute_player_usages,
     estimate_player_impact,
+    usual_starters,
 )
 from sgr.research.pythagorean import (
     DEFAULT_EXPONENT,
@@ -20,8 +22,6 @@ from sgr.research.schemas import Game, PlayerGameStatline
 from sgr.research.storage import ResearchStore
 
 EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
-
-MINIMUM_PRIOR_GAMES_TO_BE_A_STARTER = 3
 
 
 @dataclass(frozen=True)
@@ -45,24 +45,6 @@ class ImpactEvaluationReport:
     baseline_log_loss: float | None
     adjusted_log_loss: float | None
     position_sample_counts: dict[str, int]
-
-
-def _usual_starters(usages_by_team: dict[str, list], minimum_prior_games: int) -> dict[str, set[str]]:
-    """Players considered "usual starters" for a team as of a cutoff: the
-    team's top user of a production category (compute_player_usages'
-    primary_category), provided they've played at least minimum_prior_games."""
-    starters: dict[str, set[str]] = {}
-    for team_id, usages in usages_by_team.items():
-        by_category: dict[str, list] = {}
-        for usage in usages:
-            by_category.setdefault(usage.primary_category, []).append(usage)
-        team_starters = set()
-        for category, group in by_category.items():
-            top = max(group, key=lambda u: u.total_production)
-            if top.games_played >= minimum_prior_games:
-                team_starters.add(top.player_id)
-        starters[team_id] = team_starters
-    return starters
 
 
 async def evaluate_player_impact_on_missing_starters(
@@ -119,7 +101,7 @@ async def evaluate_player_impact_on_missing_starters(
 
         home_usages = compute_player_usages(all_statlines, games_by_id, game.home_team_id, game.season_year, cutoff)
         away_usages = compute_player_usages(all_statlines, games_by_id, game.away_team_id, game.season_year, cutoff)
-        starters = _usual_starters(
+        starters = usual_starters(
             {game.home_team_id: home_usages, game.away_team_id: away_usages},
             MINIMUM_PRIOR_GAMES_TO_BE_A_STARTER,
         )
