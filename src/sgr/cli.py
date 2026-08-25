@@ -21,8 +21,18 @@ from sgr.research.margin import DEFAULT_HOME_FIELD_MARGIN_POINTS, calibrate_home
 from sgr.research.margin_evaluation import run_margin_walk_forward_evaluation
 from sgr.research.player_backfill import backfill_boxscores
 from sgr.research.player_impact_evaluation import evaluate_player_impact_on_missing_starters
+from sgr.research.schemas import Game, Team
+from sgr.research.season_simulation import (
+    DEFAULT_N_SIMULATIONS,
+    DEFAULT_SIMULATION_SEED,
+    GameOutcomeSpec,
+    SeasonSimulationError,
+    combined_outcome_probability,
+    simulate_season,
+)
 from sgr.research.storage import ResearchStore
 from sgr.research.win_totals import project_season_win_totals
+from sgr.models import NFLSeasonType
 
 app = typer.Typer(help="Sports gambling research CLI")
 console = Console()
@@ -385,6 +395,112 @@ def project_win_totals(
             f"{p.confidence_low:.1f}-{p.confidence_high:.1f}",
         )
     console.print(table)
+
+
+def _resolve_cutoff(as_of: datetime | None) -> datetime:
+    return as_of.replace(tzinfo=timezone.utc) if as_of and as_of.tzinfo is None else (as_of or datetime.now(timezone.utc))
+
+
+@app.command(name="simulate-season")
+def simulate_season_cmd(
+    season: int = typer.Option(..., "--season", help="Season year to simulate"),
+    as_of: datetime = typer.Option(None, help="Point-in-time cutoff (ISO 8601, UTC); defaults to now"),
+    n_simulations: int = typer.Option(DEFAULT_N_SIMULATIONS, help="Number of Monte Carlo runs"),
+    seed: int = typer.Option(DEFAULT_SIMULATION_SEED, help="Random seed (reproducible reruns)"),
+) -> None:
+    """Full-league Monte Carlo simulation: win-total distribution, division-win
+    odds, and playoff odds per team (SUD-106)."""
+    store = ResearchStore()
+    cutoff = _resolve_cutoff(as_of)
+    try:
+        report = simulate_season(store, season, as_of=cutoff, n_simulations=n_simulations, seed=seed)
+    except SeasonSimulationError as error:
+        console.print(f"[red]{error}[/red]")
+        raise typer.Exit(code=2) from None
+
+    console.print(f"[dim]{report.tiebreaker_note}[/dim]")
+    table = Table(title=f"Season {report.season_year} simulation ({report.n_simulations} runs, seed={report.seed}, as of {report.as_of.isoformat()})")
+    table.add_column("Team")
+    table.add_column("Conf/Div")
+    table.add_column("Win total (p10-p50-p90)")
+    table.add_column("Mean wins")
+    table.add_column("Div. win %")
+    table.add_column("Playoff %")
+    for r in report.team_results:
+        table.add_row(
+            r.abbreviation,
+            f"{r.conference} {r.division}",
+            f"{r.win_total_p10:g}-{r.win_total_p50:g}-{r.win_total_p90:g}",
+            f"{r.mean_win_total:.1f}",
+            f"{r.division_win_probability:.1%}",
+            f"{r.playoff_probability:.1%}",
+        )
+    console.print(table)
+
+
+@app.command()
+def combined_outcome(
+    season: int = typer.Option(..., "--season", help="Season year"),
+    pick: list[str] = typer.Option(
+        ..., "--pick", help="WEEK:WINNER_ABBR:OPPONENT_ABBR, e.g. 2:KC:LV; repeat for multiple games"
+    ),
+    as_of: datetime = typer.Option(None, help="Point-in-time cutoff (ISO 8601, UTC); defaults to now"),
+    n_simulations: int = typer.Option(DEFAULT_N_SIMULATIONS, help="Number of Monte Carlo runs"),
+    seed: int = typer.Option(DEFAULT_SIMULATION_SEED, help="Random seed (reproducible reruns)"),
+) -> None:
+    """The model's estimated joint probability and fair/breakeven odds for a
+    user-specified set of game outcomes -- a research/calibration figure,
+    never a recommendation, pick, or ranked combination (SUD-106)."""
+    store = ResearchStore()
+    cutoff = _resolve_cutoff(as_of)
+
+    teams_by_abbr = {t.abbreviation: t for t in store.load_all("team") if isinstance(t, Team)}
+    season_games = [
+        g for g in store.load_all("game")
+        if isinstance(g, Game) and g.season_type == NFLSeasonType.REGULAR and g.season_year == season
+    ]
+
+    outcomes: list[GameOutcomeSpec] = []
+    for entry in pick:
+        try:
+            week_str, winner_abbr, opponent_abbr = entry.split(":")
+            week = int(week_str)
+        except ValueError:
+            console.print(f"[red]--pick must be WEEK:WINNER_ABBR:OPPONENT_ABBR, got {entry!r}[/red]")
+            raise typer.Exit(code=2) from None
+        winner_team = teams_by_abbr.get(winner_abbr)
+        opponent_team = teams_by_abbr.get(opponent_abbr)
+        if winner_team is None or opponent_team is None:
+            console.print(f"[red]Unknown team abbreviation in --pick {entry!r}[/red]")
+            raise typer.Exit(code=2) from None
+        game = next(
+            (
+                g for g in season_games
+                if g.week == week and {g.home_team_id, g.away_team_id} == {winner_team.id, opponent_team.id}
+            ),
+            None,
+        )
+        if game is None:
+            console.print(f"[red]No week {week} game found between {winner_abbr} and {opponent_abbr} in {season}[/red]")
+            raise typer.Exit(code=2) from None
+        outcomes.append(GameOutcomeSpec(game.id, winner_team.id, f"{winner_abbr} over {opponent_abbr} (wk{week})"))
+
+    try:
+        result = combined_outcome_probability(
+            store, season, outcomes, as_of=cutoff, n_simulations=n_simulations, seed=seed,
+        )
+    except SeasonSimulationError as error:
+        console.print(f"[red]{error}[/red]")
+        raise typer.Exit(code=2) from None
+
+    console.print(f"[dim]{result.label}[/dim]")
+    for spec in result.outcomes:
+        console.print(f"  - {spec.description}")
+    console.print(f"Joint probability: {result.joint_probability:.4f}")
+    console.print(
+        f"Fair (breakeven) decimal odds: {result.fair_decimal_odds:.2f}"
+        if result.fair_decimal_odds is not None else "Fair decimal odds: n/a (probability is zero)"
+    )
 
 
 if __name__ == "__main__":
