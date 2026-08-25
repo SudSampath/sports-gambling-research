@@ -22,8 +22,9 @@ from sgr.research.pythagorean import (
     pythagorean_win_pct,
     shrink_toward_prior,
 )
-from sgr.research.schemas import Game
+from sgr.research.schemas import Game, PlayerGameStatline
 from sgr.research.storage import ResearchStore
+from sgr.research.turnover_adjustment import build_turnovers_committed_index, turnover_normalized_probability
 
 # Decision-time offset used throughout evaluation: each test prediction is
 # generated as of 24 hours before its own kickoff, matching the T-24h
@@ -305,11 +306,20 @@ def run_walk_forward_evaluation(
         key=lambda g: g.kickoff_at,
     )
 
+    turnovers_index = (
+        build_turnovers_committed_index(
+            [s for s in store.load_all("player_game_statline") if isinstance(s, PlayerGameStatline)]
+        )
+        if include_baselines
+        else {}
+    )
+
     samples: list[GameSample] = []
     baseline_samples: dict[str, list[GameSample]] = {
         "home_field_only": [],
         "prior_win_pct": [],
         "raw_pythagorean": [],
+        "turnover_normalized": [],
     }
 
     for game in test_games:
@@ -350,6 +360,13 @@ def run_walk_forward_evaluation(
                     "raw_pythagorean",
                     lambda: raw_pythagorean_probability(
                         all_games, game.home_team_id, game.away_team_id, game.season_year,
+                        cutoff, neutral_site=game.neutral_site, exponent=exponent,
+                    ),
+                ),
+                (
+                    "turnover_normalized",
+                    lambda: turnover_normalized_probability(
+                        all_games, turnovers_index, game.home_team_id, game.away_team_id, game.season_year,
                         cutoff, neutral_site=game.neutral_site, exponent=exponent,
                     ),
                 ),

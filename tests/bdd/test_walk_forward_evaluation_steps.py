@@ -127,7 +127,9 @@ def exclusion_reasons_listed(evaluation_context):
 @then("home-field-only, prior-win-percentage, and raw-Pythagorean baseline metrics are reported alongside the model")
 def baselines_reported(evaluation_context):
     report = evaluation_context["result"]
-    assert set(report.baseline_overall) == {"home_field_only", "prior_win_pct", "raw_pythagorean"}
+    assert set(report.baseline_overall) == {
+        "home_field_only", "prior_win_pct", "raw_pythagorean", "turnover_normalized",
+    }
 
 
 @then("metrics are available broken out by season")
