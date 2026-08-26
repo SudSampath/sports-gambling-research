@@ -67,7 +67,7 @@ class ComparisonReport:
     results: dict[str, MetricSummary]
 
 
-def _brier_log_loss_accuracy(samples: list[CandidateSample]) -> MetricSummary:
+def brier_log_loss_accuracy(samples: list[CandidateSample]) -> MetricSummary:
     scored = [s for s in samples if not s.abstained and not s.is_tie]
     excluded = len(samples) - len(scored)
     if not scored:
@@ -214,5 +214,5 @@ def run_candidate_comparison(
         blended_probability = min(max(_from_logit(blended_logit) + injury_delta, 1e-6), 1 - 1e-6)
         samples["blended"].append(CandidateSample(game.id, blended_probability, actual_home_win, is_tie, False))
 
-    results = {name: _brier_log_loss_accuracy(samples[name]) for name in CONFIGURATIONS}
+    results = {name: brier_log_loss_accuracy(samples[name]) for name in CONFIGURATIONS}
     return ComparisonReport(season_years=tuple(sorted(set(season_years))), results=results)
