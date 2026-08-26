@@ -282,21 +282,20 @@ class PriorShrinkageComparisonReport:
     full_season_significance: SignificanceResult
 
 
-def run_prior_shrinkage_comparison(
+def _paired_walk_forward_samples(
     store: ResearchStore,
     season_years: list[int],
     *,
-    exponent: float = DEFAULT_EXPONENT,
-    prior_shrinkage_for: float = DEFAULT_PRIOR_SHRINKAGE_FOR,
-    prior_shrinkage_against: float = DEFAULT_PRIOR_SHRINKAGE_AGAINST,
-) -> PriorShrinkageComparisonReport:
-    """Walk-forward compares the unadjusted baseline against the shrunk-prior
-    candidate, broken out for Week 1 (the regime this ticket targets --
-    every team has current_games_played=0 at a Week 1 cutoff by
-    construction, so this is the "zero games played" comparison the AC
-    calls for) separately from the full season (so a real improvement at
-    Week 1 can be checked against not quietly making the rest of the
-    season worse).
+    exponent: float,
+    prior_shrinkage_for: float,
+    prior_shrinkage_against: float,
+) -> list[tuple[int, CandidateSample, CandidateSample]]:
+    """(week, baseline_sample, shrunk_sample) for every completed regular-season
+    test game in season_years, walking forward exactly like every other
+    evaluation in this project (a strictly-before-kickoff cutoff, reading
+    only what would have actually been known). Shared by both the Week-1-
+    vs-full-season comparison and the full week-by-week trajectory, so the
+    two never compute the underlying forecasts differently.
     """
     all_games = [g for g in store.load_all("game") if isinstance(g, Game)]
     test_games = sorted(
@@ -308,11 +307,7 @@ def run_prior_shrinkage_comparison(
         key=lambda g: g.kickoff_at,
     )
 
-    week1_baseline: list[CandidateSample] = []
-    week1_shrunk: list[CandidateSample] = []
-    full_baseline: list[CandidateSample] = []
-    full_shrunk: list[CandidateSample] = []
-
+    results: list[tuple[int, CandidateSample, CandidateSample]] = []
     for game in test_games:
         cutoff = game.kickoff_at - timedelta(hours=FEATURE_CUTOFF_HOURS_BEFORE_KICKOFF)
         is_tie = game.home_score == game.away_score
@@ -337,11 +332,34 @@ def run_prior_shrinkage_comparison(
         except (InsufficientHistoryError, InvalidScoringInputError):
             shrunk_sample = CandidateSample(game.id, None, actual_home_win, is_tie, True)
 
-        full_baseline.append(baseline_sample)
-        full_shrunk.append(shrunk_sample)
-        if game.week == 1:
-            week1_baseline.append(baseline_sample)
-            week1_shrunk.append(shrunk_sample)
+        results.append((game.week, baseline_sample, shrunk_sample))
+    return results
+
+
+def run_prior_shrinkage_comparison(
+    store: ResearchStore,
+    season_years: list[int],
+    *,
+    exponent: float = DEFAULT_EXPONENT,
+    prior_shrinkage_for: float = DEFAULT_PRIOR_SHRINKAGE_FOR,
+    prior_shrinkage_against: float = DEFAULT_PRIOR_SHRINKAGE_AGAINST,
+) -> PriorShrinkageComparisonReport:
+    """Walk-forward compares the unadjusted baseline against the shrunk-prior
+    candidate, broken out for Week 1 (the regime this ticket targets --
+    every team has current_games_played=0 at a Week 1 cutoff by
+    construction, so this is the "zero games played" comparison the AC
+    calls for) separately from the full season (so a real improvement at
+    Week 1 can be checked against not quietly making the rest of the
+    season worse).
+    """
+    samples = _paired_walk_forward_samples(
+        store, season_years, exponent=exponent,
+        prior_shrinkage_for=prior_shrinkage_for, prior_shrinkage_against=prior_shrinkage_against,
+    )
+    week1_baseline = [b for w, b, s in samples if w == 1]
+    week1_shrunk = [s for w, b, s in samples if w == 1]
+    full_baseline = [b for w, b, s in samples]
+    full_shrunk = [s for w, b, s in samples]
 
     return PriorShrinkageComparisonReport(
         season_years=tuple(sorted(set(season_years))),
@@ -351,4 +369,69 @@ def run_prior_shrinkage_comparison(
         full_season_prior_shrunk=brier_log_loss_accuracy(full_shrunk),
         week1_significance=_significance(week1_baseline, week1_shrunk),
         full_season_significance=_significance(full_baseline, full_shrunk),
+    )
+
+
+@dataclass(frozen=True)
+class WeeklyTrajectoryReport:
+    season_years: tuple[int, ...]
+    by_week: dict[int, tuple[MetricSummary, MetricSummary]]  # week -> (baseline, prior_shrunk)
+    cumulative_windows: dict[str, tuple[MetricSummary, MetricSummary, SignificanceResult]]  # e.g. "weeks<=4" -> (baseline, shrunk, significance)
+
+
+def run_prior_shrinkage_weekly_trajectory(
+    store: ResearchStore,
+    season_years: list[int],
+    *,
+    exponent: float = DEFAULT_EXPONENT,
+    prior_shrinkage_for: float = DEFAULT_PRIOR_SHRINKAGE_FOR,
+    prior_shrinkage_against: float = DEFAULT_PRIOR_SHRINKAGE_AGAINST,
+    cumulative_week_cutoffs: tuple[int, ...] = (1, 2, 4, 8, 17),
+) -> WeeklyTrajectoryReport:
+    """Full week-by-week walk-forward trajectory, "blind" exactly like every
+    other evaluation in this project (each week's games forecast using only
+    completed games strictly before that week's own kickoffs -- nothing
+    about how any later week actually turned out).
+
+    Reports two views of the same underlying samples:
+    - by_week: baseline vs. shrunk-prior metrics for each week in
+      isolation (small samples, ~16 games each -- shows the trajectory
+      shape, not intended to be individually significance-tested).
+    - cumulative_windows: baseline vs. shrunk-prior metrics AND a real
+      significance test pooled over weeks 1..N for each N in
+      cumulative_week_cutoffs -- more statistical power than any single
+      week alone, and directly answers "does pooling more of the
+      early-season games (where the two models can actually differ, since
+      shrinkage_weight -> 1 by mid-season regardless of how the prior
+      season was computed) turn up a real, detectable effect."
+    """
+    samples = _paired_walk_forward_samples(
+        store, season_years, exponent=exponent,
+        prior_shrinkage_for=prior_shrinkage_for, prior_shrinkage_against=prior_shrinkage_against,
+    )
+
+    weeks_present = sorted({w for w, _b, _s in samples})
+    by_week: dict[int, tuple[MetricSummary, MetricSummary]] = {}
+    for week in weeks_present:
+        week_baseline = [b for w, b, s in samples if w == week]
+        week_shrunk = [s for w, b, s in samples if w == week]
+        by_week[week] = (brier_log_loss_accuracy(week_baseline), brier_log_loss_accuracy(week_shrunk))
+
+    cumulative_windows: dict[str, tuple[MetricSummary, MetricSummary, SignificanceResult]] = {}
+    for cutoff_week in cumulative_week_cutoffs:
+        window_baseline = [b for w, b, s in samples if w <= cutoff_week]
+        window_shrunk = [s for w, b, s in samples if w <= cutoff_week]
+        if not window_baseline:
+            continue
+        label = f"weeks<={cutoff_week}"
+        cumulative_windows[label] = (
+            brier_log_loss_accuracy(window_baseline),
+            brier_log_loss_accuracy(window_shrunk),
+            _significance(window_baseline, window_shrunk),
+        )
+
+    return WeeklyTrajectoryReport(
+        season_years=tuple(sorted(set(season_years))),
+        by_week=by_week,
+        cumulative_windows=cumulative_windows,
     )

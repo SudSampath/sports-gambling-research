@@ -31,3 +31,10 @@ Feature: SUD-112 regress prior-season strength toward league average
     Given a season with real completed games across multiple weeks and teams
     When the prior-shrinkage comparison runs
     Then Week 1 metrics and full-season metrics are both reported, for the baseline and the shrunk-prior candidate
+
+  Scenario: The weekly trajectory reports each week and cumulative early-season windows
+    Given a season with real completed games across multiple weeks and teams
+    When the prior-shrinkage weekly trajectory runs
+    Then every week that has games appears in the by-week breakdown
+    And each cumulative window includes every week up to its own cutoff
+    And each cumulative window carries a significance result
