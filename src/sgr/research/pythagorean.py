@@ -313,26 +313,34 @@ def apply_home_field(raw_home_win_probability: float, *, neutral_site: bool) -> 
     return sigmoid(z)
 
 
-# Process-lifetime cache for the injury-adjustment inputs, keyed by a
-# ResearchStore instance's id(). generate_forecast is frequently called
+# Process-lifetime cache for the injury-adjustment inputs, keyed by the
+# store's own database path (stable and semantically correct: "same
+# underlying database"), NOT id(store) -- id() is only unique among
+# currently-alive objects, and a garbage-collected ResearchStore's id can
+# be reused by a later, unrelated ResearchStore instance (this is exactly
+# what happened in this project's own test suite: many short-lived
+# tmp_path-backed stores are created and destroyed, and an id-keyed cache
+# occasionally served one test's empty cache entry to a completely
+# different later test's store). generate_forecast is frequently called
 # hundreds of times in one process (a season simulation, a win-totals
-# report) with apply_injury_adjustment left at its default; without this,
-# every one of those calls re-queries and re-parses the full
+# report) with apply_injury_adjustment left at its default; without this
+# cache, every one of those calls re-queries and re-parses the full
 # player_game_statline table (tens of thousands of rows) from scratch. This
-# assumes the underlying tables do not change during one process's
+# still assumes the underlying tables do not change during one process's
 # lifetime -- true for the CLI/report-generation tools that are the only
 # current source of high-volume generate_forecast calls, not a general
 # guarantee for a long-running server.
-_INJURY_INPUTS_CACHE: dict[int, tuple[list[PlayerGameStatline], list[AvailabilityReport]]] = {}
+_INJURY_INPUTS_CACHE: dict[str, tuple[list[PlayerGameStatline], list[AvailabilityReport]]] = {}
 
 
 def _cached_injury_inputs(store: ResearchStore) -> tuple[list[PlayerGameStatline], list[AvailabilityReport]]:
-    cached = _INJURY_INPUTS_CACHE.get(id(store))
+    cache_key = str(store.database_path)
+    cached = _INJURY_INPUTS_CACHE.get(cache_key)
     if cached is not None:
         return cached
     statlines = [s for s in store.load_all("player_game_statline") if isinstance(s, PlayerGameStatline)]
     availability_reports = [r for r in store.load_all("availability_report") if isinstance(r, AvailabilityReport)]
-    _INJURY_INPUTS_CACHE[id(store)] = (statlines, availability_reports)
+    _INJURY_INPUTS_CACHE[cache_key] = (statlines, availability_reports)
     return statlines, availability_reports
 
 

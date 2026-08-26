@@ -3,6 +3,39 @@ from __future__ import annotations
 import math
 
 
+def paired_normal_z_test(differences: list[float]) -> tuple[float, float]:
+    """Two-sided paired z-test p-value for a list of per-game differences
+    (e.g. each game's baseline squared error minus its candidate squared
+    error, for a paired Brier-score comparison) -- the accuracy-based
+    Fisher/McNemar tests above only see whether a prediction crossed the
+    50% line, not by how much it missed; a small, consistent shift in
+    calibration can be invisible to them but show up here.
+
+    A normal approximation (not an exact/Student's-t distribution), valid
+    for the sample sizes this project's real season data actually produces
+    (dozens to hundreds of games -- large enough for the central limit
+    theorem to apply) without needing scipy or an incomplete-beta-function
+    implementation for an exact t-distribution CDF. Not intended for very
+    small samples (a handful of games); Fisher/McNemar's exact tests are
+    the right tool there instead.
+
+    Returns (z_statistic, two_sided_p_value). Raises ValueError for fewer
+    than 2 differences or zero variance (nothing to test).
+    """
+    n = len(differences)
+    if n < 2:
+        raise ValueError("Need at least 2 paired differences to run a z-test.")
+    mean_diff = sum(differences) / n
+    variance = sum((d - mean_diff) ** 2 for d in differences) / (n - 1)
+    if variance == 0:
+        raise ValueError("Zero variance in paired differences; nothing to test.")
+    standard_error = math.sqrt(variance / n)
+    z = mean_diff / standard_error
+    # Two-sided p-value from the standard normal CDF via the error function.
+    p_value = 2 * (1 - 0.5 * (1 + math.erf(abs(z) / math.sqrt(2))))
+    return z, p_value
+
+
 def fisher_exact_p_value(a: int, b: int, c: int, d: int) -> float:
     """Two-sided Fisher-Irwin exact test p-value for a 2x2 table
 

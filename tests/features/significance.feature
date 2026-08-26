@@ -20,3 +20,8 @@ Feature: Exact significance tests for small-sample model comparisons
     Given a Week 1-sized sample where the two predictors differ by a single game
     When both significance tests are computed
     Then neither test rejects the hypothesis that the difference is due to chance
+
+  Scenario: The paired z-test's p-value matches the standard normal distribution for its own z-statistic
+    Given a real, non-trivial set of per-game score differences
+    When the paired z-test is computed
+    Then the p-value equals the standard normal two-sided p-value for that same z-statistic

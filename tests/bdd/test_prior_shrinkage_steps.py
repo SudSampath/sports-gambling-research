@@ -222,3 +222,36 @@ def both_breakdowns_reported(shrink_context):
     assert report.week1_significance.mcnemar_p_value is not None
     assert report.full_season_significance.fisher_exact_p_value is not None
     assert report.full_season_significance.mcnemar_p_value is not None
+
+
+@when("the prior-shrinkage weekly trajectory runs")
+def run_weekly_trajectory(shrink_context):
+    from sgr.research.prior_shrinkage import run_prior_shrinkage_weekly_trajectory
+
+    shrink_context["trajectory"] = run_prior_shrinkage_weekly_trajectory(
+        shrink_context["store"], shrink_context["season_years"], cumulative_week_cutoffs=(1, 2, 3)
+    )
+
+
+@then("every week that has games appears in the by-week breakdown")
+def every_week_present(shrink_context):
+    trajectory = shrink_context["trajectory"]
+    assert set(trajectory.by_week) == {1, 2, 3}
+    for baseline, shrunk in trajectory.by_week.values():
+        assert baseline.sample_count > 0
+        assert shrunk.sample_count > 0
+
+
+@then("each cumulative window includes every week up to its own cutoff")
+def cumulative_windows_grow(shrink_context):
+    trajectory = shrink_context["trajectory"]
+    counts = [trajectory.cumulative_windows[f"weeks<={n}"][0].sample_count for n in (1, 2, 3)]
+    assert counts == sorted(counts)
+    assert counts[0] < counts[-1]
+
+
+@then("each cumulative window carries a significance result")
+def cumulative_windows_have_significance(shrink_context):
+    trajectory = shrink_context["trajectory"]
+    for baseline, shrunk, significance in trajectory.cumulative_windows.values():
+        assert significance.sample_count == baseline.sample_count

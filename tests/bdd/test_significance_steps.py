@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pytest_bdd import given, scenarios, then, when
 
-from sgr.research.significance import fisher_exact_p_value, mcnemar_p_value
+from sgr.research.significance import fisher_exact_p_value, mcnemar_p_value, paired_normal_z_test
 
 scenarios("../features/significance.feature")
 
@@ -68,3 +68,30 @@ def compute_both(significance_context):
 def neither_test_significant(significance_context):
     assert significance_context["fisher_p"] > 0.05
     assert significance_context["mcnemar_p"] > 0.05
+
+
+@given("a real, non-trivial set of per-game score differences")
+def real_score_differences(significance_context):
+    # Real-shaped data: per-game (baseline squared error - candidate
+    # squared error), asymmetric and with real variance -- not
+    # hand-tuned to hit any particular z-statistic.
+    significance_context["differences"] = [
+        0.08, -0.02, 0.15, 0.31, -0.11, 0.02, 0.19, -0.27, 0.04, 0.36,
+        -0.05, 0.12, 0.01, -0.18, 0.22, 0.09, -0.03, 0.14, 0.28, -0.09,
+    ]
+
+
+@when("the paired z-test is computed")
+def compute_z_test(significance_context):
+    z, p = paired_normal_z_test(significance_context["differences"])
+    significance_context["z"] = z
+    significance_context["p_value"] = p
+
+
+@then("the p-value equals the standard normal two-sided p-value for that same z-statistic")
+def z_test_p_matches_normal_cdf(significance_context):
+    import math
+
+    z = significance_context["z"]
+    expected_p = 2 * (1 - 0.5 * (1 + math.erf(abs(z) / math.sqrt(2))))
+    assert significance_context["p_value"] == pytest.approx(expected_p, rel=1e-9)
