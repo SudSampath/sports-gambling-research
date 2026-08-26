@@ -14,6 +14,7 @@ from sgr.backtest import run_binary_backtest
 from sgr.config import ConfigurationError
 from sgr.connectors import KalshiConnector
 from sgr.connectors.espn import EspnConnector
+from sgr.connectors.nflverse import NflverseConnector
 from sgr.research.candidate_comparison import run_candidate_comparison
 from sgr.research.evaluation import run_walk_forward_evaluation
 from sgr.research.historical import SeasonCoverageError, ingest_regular_season
@@ -23,6 +24,11 @@ from sgr.research.margin import DEFAULT_HOME_FIELD_MARGIN_POINTS, calibrate_home
 from sgr.research.margin_evaluation import run_margin_walk_forward_evaluation
 from sgr.research.player_backfill import backfill_boxscores
 from sgr.research.player_impact_evaluation import evaluate_player_impact_on_missing_starters
+from sgr.research.roster_continuity import (
+    ingest_roster_continuity,
+    project_season_win_totals_with_roster_continuity,
+)
+from sgr.research.roster_continuity_evaluation import run_roster_continuity_evaluation
 from sgr.research.schemas import Game, Team
 from sgr.research.season_simulation import (
     DEFAULT_N_SIMULATIONS,
@@ -419,6 +425,118 @@ def project_win_totals(
             f"{p.expected_additional_wins:.2f}",
             f"{p.expected_total_wins:.2f}",
             f"{p.confidence_low:.1f}-{p.confidence_high:.1f}",
+        )
+    console.print(table)
+
+
+@app.command(name="ingest-roster-continuity")
+def ingest_roster_continuity_cmd(
+    season: int = typer.Option(..., "--season", help="Target NFL season year"),
+    as_of: datetime = typer.Option(
+        None,
+        help="Historical feature cutoff (ISO 8601); required with --historical-week1",
+    ),
+    historical_week1: bool = typer.Option(
+        False,
+        "--historical-week1",
+        help="Use the target season's Week 1 roster instead of the current roster",
+    ),
+    refresh: bool = typer.Option(False, help="Bypass the local nflverse CSV cache"),
+) -> None:
+    """Ingest prior-snap-weighted roster retention from nflverse (SUD-118)."""
+    if historical_week1 and as_of is None:
+        console.print("[red]--as-of is required with --historical-week1.[/red]")
+        raise typer.Exit(code=2)
+
+    async def _run() -> None:
+        requested_cutoff = _resolve_cutoff(as_of)
+        signals = await ingest_roster_continuity(
+            NflverseConnector(),
+            ResearchStore(),
+            season,
+            feature_cutoff_at=requested_cutoff,
+            historical_week1=historical_week1,
+            refresh=refresh,
+        )
+        table = Table(title=f"Season {season} roster continuity")
+        table.add_column("Teams")
+        table.add_column("Source")
+        table.add_column("Feature cutoff")
+        table.add_row(
+            str(len(signals)),
+            signals[0].roster_source_kind,
+            signals[0].feature_cutoff_at.isoformat(),
+        )
+        console.print(table)
+
+    asyncio.run(_run())
+
+
+@app.command(name="compare-roster-continuity")
+def compare_roster_continuity_cmd(
+    seasons: list[int] = typer.Option(
+        ..., "--season", help="Completed held-out season; repeat for multiple"
+    ),
+) -> None:
+    """Compare baseline and roster continuity on game and win-total errors (SUD-118)."""
+    report = run_roster_continuity_evaluation(ResearchStore(), seasons)
+    table = Table(title=f"Roster-continuity holdout ({', '.join(str(y) for y in report.season_years)})")
+    table.add_column("Configuration")
+    table.add_column("Game Brier")
+    table.add_column("Game log loss")
+    table.add_column("Accuracy")
+    table.add_column("Win-total MAE")
+    table.add_column("Win-total RMSE")
+    for name, game, wins in (
+        ("baseline", report.baseline_game_metrics, report.baseline_win_total_metrics),
+        (report.model_version, report.candidate_game_metrics, report.candidate_win_total_metrics),
+    ):
+        table.add_row(
+            name,
+            f"{game.brier_score:.6f}" if game.brier_score is not None else "-",
+            f"{game.log_loss:.6f}" if game.log_loss is not None else "-",
+            f"{game.accuracy:.2%}" if game.accuracy is not None else "-",
+            f"{wins.mean_absolute_error:.3f}",
+            f"{wins.root_mean_squared_error:.3f}",
+        )
+    console.print(table)
+    console.print(
+        f"Paired Brier z={report.paired_brier_z:.3f}, p={report.paired_brier_p_value:.4f}"
+        if report.paired_brier_z is not None else "Paired Brier test: unavailable (zero variance/too few samples)"
+    )
+    console.print(
+        f"Paired win-total squared-error z={report.paired_win_total_z:.3f}, "
+        f"p={report.paired_win_total_p_value:.4f}"
+        if report.paired_win_total_z is not None else "Paired win-total test: unavailable (zero variance/too few samples)"
+    )
+
+
+@app.command(name="project-roster-continuity")
+def project_roster_continuity_cmd(
+    season: int = typer.Option(..., "--season", help="Season year to project"),
+    as_of: datetime = typer.Option(None, help="Point-in-time cutoff (ISO 8601); defaults to now"),
+) -> None:
+    """Show current baseline and roster-continuity win estimates side by side."""
+    store = ResearchStore()
+    cutoff = _resolve_cutoff(as_of)
+    baseline = project_season_win_totals(
+        store, season, as_of=cutoff, apply_injury_adjustment=False
+    )
+    candidate = project_season_win_totals_with_roster_continuity(store, season, as_of=cutoff)
+    baseline_by_team = {projection.team_id: projection for projection in baseline.projections}
+    table = Table(title=f"Season {season} win totals as of {cutoff.isoformat()}")
+    table.add_column("Team")
+    table.add_column("Baseline")
+    table.add_column("Roster continuity")
+    table.add_column("Delta")
+    for projection in candidate.projections:
+        baseline_projection = baseline_by_team[projection.team_id]
+        delta = projection.expected_total_wins - baseline_projection.expected_total_wins
+        table.add_row(
+            projection.abbreviation,
+            f"{baseline_projection.expected_total_wins:.2f}",
+            f"{projection.expected_total_wins:.2f}",
+            f"{delta:+.2f}",
         )
     console.print(table)
 

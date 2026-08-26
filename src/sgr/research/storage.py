@@ -24,6 +24,7 @@ TABLES = {
     "team": "teams",
     "game": "games",
     "team_strength_snapshot": "team_strength_snapshots",
+    "roster_continuity_signal": "roster_continuity_signals",
     "kalshi_event": "kalshi_events",
     "kalshi_market": "kalshi_markets",
     "orderbook_snapshot": "orderbook_snapshots",

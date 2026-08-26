@@ -62,6 +62,7 @@ def project_season_win_totals(
     *,
     as_of: datetime,
     exponent: float = DEFAULT_EXPONENT,
+    apply_injury_adjustment: bool = True,
 ) -> SeasonWinTotalReport:
     """Each team's projected win total as wins-so-far (actual) plus expected-
     additional-wins (sum of forecast win probabilities for remaining games),
@@ -99,7 +100,13 @@ def project_season_win_totals(
         remaining_variance = 0.0
         for game in remaining:
             try:
-                forecast = generate_forecast(store, game.id, feature_cutoff_at=as_of, exponent=exponent)
+                forecast = generate_forecast(
+                    store,
+                    game.id,
+                    feature_cutoff_at=as_of,
+                    exponent=exponent,
+                    apply_injury_adjustment=apply_injury_adjustment,
+                )
             except InsufficientHistoryError:
                 # No completed history for one side yet (e.g. before Week 1
                 # of a fresh season with no prior-season data at all). Falls

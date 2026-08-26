@@ -13,6 +13,14 @@ A public, research-only Python project for evaluating NFL event-market signals. 
 
 The win-probability model is a Pythagorean expectation (`src/sgr/research/pythagorean.py`): each team's strength is `points_for^x / (points_for^x + points_against^x)`, blended toward its prior season early on so a small in-season sample doesn't dominate. Two teams' strengths combine into a win probability via the log5 formula, plus a home-field adjustment. Every forecast is generated from a required, explicit `feature_cutoff_at` and only ever reads games completed strictly before it (`src/sgr/research/evaluation.py` walk-forward evaluates this chronologically, so a rerun with a later cutoff never changes an earlier prediction).
 
+An opt-in roster-continuity variant weights returning players by prior-season
+snaps and regresses extreme prior scoring rates toward league average when
+continuity is low. It leaves the default model unchanged because its 2025 game
+probability gain was not statistically significant. See the
+[2026-08-26 research note](docs/research/roster-continuity-2026-08-26.md) and
+the `ingest-roster-continuity`, `compare-roster-continuity`, and
+`project-roster-continuity` CLI commands.
+
 Built on top of that baseline:
 
 - **Win totals** (`win_totals.py`): each team's expected season win total is the exact sum of its per-game win probabilities (linearity of expectation, no simulation), with a variance-based confidence band.
