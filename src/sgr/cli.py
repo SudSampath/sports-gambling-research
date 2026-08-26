@@ -529,6 +529,8 @@ def project_roster_continuity_cmd(
     table.add_column("Baseline")
     table.add_column("Roster continuity")
     table.add_column("Delta")
+    table.add_column("Off retained")
+    table.add_column("Def retained")
     for projection in candidate.projections:
         baseline_projection = baseline_by_team[projection.team_id]
         delta = projection.expected_total_wins - baseline_projection.expected_total_wins
@@ -537,6 +539,8 @@ def project_roster_continuity_cmd(
             f"{baseline_projection.expected_total_wins:.2f}",
             f"{projection.expected_total_wins:.2f}",
             f"{delta:+.2f}",
+            f"{projection.offense_retention:.1%}",
+            f"{projection.defense_retention:.1%}",
         )
     console.print(table)
 

@@ -36,3 +36,9 @@ Feature: SUD-118 snap-weighted roster continuity model variant
     When the roster-continuity holdout comparison runs
     Then game and win-total metrics are reported for both configurations
     And the candidate remains identified as an opt-in model version
+
+  Scenario: Current estimates expose their continuity inputs
+    Given a completed synthetic season with preseason continuity signals
+    When continuity-adjusted win totals are projected before Week 1
+    Then every adjusted estimate identifies its retained offense and defense shares
+    And the projection report identifies the opt-in model version

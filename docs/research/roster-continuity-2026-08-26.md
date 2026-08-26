@@ -95,15 +95,15 @@ test of roster continuity.
 Using the 2026 roster snapshot retrieved on 2026-08-26, the signal mostly
 shrinks extreme 2025 scoring performances. The largest current revisions are:
 
-| Team | Baseline wins | Continuity wins | Delta |
-|---|---:|---:|---:|
-| Arizona | 5.28 | 8.23 | +2.95 |
-| Tennessee | 4.19 | 6.23 | +2.04 |
-| Las Vegas | 3.56 | 5.39 | +1.83 |
-| New York Jets | 4.20 | 5.67 | +1.47 |
-| Jacksonville | 11.36 | 9.91 | -1.45 |
-| New England | 11.92 | 10.50 | -1.42 |
-| Seattle | 12.63 | 11.21 | -1.42 |
+| Team | Baseline wins | Continuity wins | Delta | Off./def. retained |
+|---|---:|---:|---:|---:|
+| Tennessee | 4.19 | 6.23 | +2.04 | 39.2% / 47.7% |
+| Las Vegas | 3.56 | 5.51 | +1.95 | 36.9% / 63.9% |
+| New York Jets | 4.20 | 5.80 | +1.59 | 35.6% / 65.4% |
+| Jacksonville | 11.36 | 9.91 | -1.45 | 39.6% / 68.4% |
+| New England | 11.92 | 10.50 | -1.42 | 43.5% / 69.5% |
+| Buffalo | 10.61 | 9.40 | -1.21 | 46.2% / 50.6% |
+| Seattle | 12.63 | 11.43 | -1.20 | 48.2% / 78.9% |
 
 These are model estimates for research and calibration, not wagering advice.
 

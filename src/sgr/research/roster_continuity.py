@@ -38,6 +38,7 @@ DEFENSE_REVERSION_COEFFICIENT = 1.183390
 
 RETAINED_ROSTER_STATUSES = frozenset({"ACT", "INA", "RES"})
 TEAM_ALIASES = {
+    "AZ": "ARI",
     "JAC": "JAX",
     "LA": "LAR",
     "OAK": "LV",
@@ -81,7 +82,14 @@ class RosterContinuityProjectionReport:
     model_version: str
     offense_reversion_coefficient: float
     defense_reversion_coefficient: float
-    projections: tuple[TeamWinTotalProjection, ...]
+    projections: tuple[RosterContinuityTeamWinTotalProjection, ...]
+
+
+@dataclass(frozen=True)
+class RosterContinuityTeamWinTotalProjection(TeamWinTotalProjection):
+    offense_retention: float
+    defense_retention: float
+    continuity_feature_cutoff_at: datetime
 
 
 def normalize_team_abbreviation(value: str) -> str:
@@ -510,7 +518,7 @@ def project_season_win_totals_with_roster_continuity(
         if game.season_type == NFLSeasonType.REGULAR and game.season_year == season_year
     ]
     team_ids = sorted({game.home_team_id for game in season_games} | {game.away_team_id for game in season_games})
-    projections: list[TeamWinTotalProjection] = []
+    projections: list[RosterContinuityTeamWinTotalProjection] = []
     for team_id in team_ids:
         team_games = [
             game for game in season_games if team_id in {game.home_team_id, game.away_team_id}
@@ -537,8 +545,11 @@ def project_season_win_totals_with_roster_continuity(
         expected_total = wins_so_far + expected_additional
         standard_deviation = math.sqrt(variance)
         team = teams.get(team_id)
+        continuity_signal = select_roster_continuity_signal(
+            signals, team_id, season_year, as_of
+        )
         projections.append(
-            TeamWinTotalProjection(
+            RosterContinuityTeamWinTotalProjection(
                 team_id=team_id,
                 abbreviation=team.abbreviation if team else team_id,
                 season_year=season_year,
@@ -553,6 +564,9 @@ def project_season_win_totals_with_roster_continuity(
                     wins_so_far + len(remaining),
                     expected_total + CONFIDENCE_BAND_Z * standard_deviation,
                 ),
+                offense_retention=float(continuity_signal.offense_retention),
+                defense_retention=float(continuity_signal.defense_retention),
+                continuity_feature_cutoff_at=continuity_signal.feature_cutoff_at,
             )
         )
     projections.sort(key=lambda projection: projection.expected_total_wins, reverse=True)

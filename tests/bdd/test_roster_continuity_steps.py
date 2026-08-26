@@ -17,6 +17,7 @@ from sgr.research.roster_continuity import (
     build_roster_continuity_signals,
     compute_team_strength_with_roster_continuity,
     fit_continuity_coefficient,
+    project_season_win_totals_with_roster_continuity,
     select_roster_continuity_signal,
 )
 from sgr.research.roster_continuity_evaluation import run_roster_continuity_evaluation
@@ -122,21 +123,21 @@ def mixed_roster(continuity_context):
     snap_rows = (
         {
             "season": "2024", "game_type": "REG", "player": "One", "pfr_player_id": "p1",
-            "position": "QB", "team": "BUF", "offense_snaps": "60", "defense_snaps": "60",
+            "position": "QB", "team": "ARI", "offense_snaps": "60", "defense_snaps": "60",
         },
         {
             "season": "2024", "game_type": "REG", "player": "Two", "pfr_player_id": "p2",
-            "position": "WR", "team": "BUF", "offense_snaps": "25", "defense_snaps": "25",
+            "position": "WR", "team": "ARI", "offense_snaps": "25", "defense_snaps": "25",
         },
         {
             "season": "2024", "game_type": "REG", "player": "Three", "pfr_player_id": "p3",
-            "position": "RB", "team": "BUF", "offense_snaps": "15", "defense_snaps": "15",
+            "position": "RB", "team": "ARI", "offense_snaps": "15", "defense_snaps": "15",
         },
     )
     roster_rows = (
-        {"season": "2025", "week": "1", "game_type": "REG", "team": "BUF", "status": "ACT", "pfr_id": "p1"},
-        {"season": "2025", "week": "1", "game_type": "REG", "team": "BUF", "status": "CUT", "pfr_id": "p2"},
-        {"season": "2025", "week": "1", "game_type": "REG", "team": "BUF", "status": "DEV", "pfr_id": "p3"},
+        {"season": "2025", "week": "1", "game_type": "REG", "team": "AZ", "status": "ACT", "pfr_id": "p1"},
+        {"season": "2025", "week": "1", "game_type": "REG", "team": "AZ", "status": "CUT", "pfr_id": "p2"},
+        {"season": "2025", "week": "1", "game_type": "REG", "team": "AZ", "status": "DEV", "pfr_id": "p3"},
     )
     continuity_context["snap_snapshot"] = NflverseCsvSnapshot(snap_rows, SNAPS_SOURCE)
     continuity_context["roster_snapshot"] = NflverseCsvSnapshot(roster_rows, ROSTER_SOURCE)
@@ -147,7 +148,7 @@ def normalize_signal(continuity_context):
     continuity_context["signals"] = build_roster_continuity_signals(
         continuity_context["snap_snapshot"],
         continuity_context["roster_snapshot"],
-        [_team("BUF")],
+        [_team("ARI")],
         2025,
         feature_cutoff_at=SIGNAL_CUTOFF,
         roster_source_kind="historical_week1",
@@ -299,3 +300,24 @@ def metrics_reported(continuity_context):
 def opt_in_version(continuity_context):
     assert continuity_context["report"].model_version == MODEL_VERSION
     assert "roster-continuity" in MODEL_VERSION
+
+
+@when("continuity-adjusted win totals are projected before Week 1")
+def project_continuity_totals(continuity_context):
+    continuity_context["projection_report"] = project_season_win_totals_with_roster_continuity(
+        continuity_context["store"], 2025, as_of=TARGET_START - timedelta(days=1)
+    )
+
+
+@then("every adjusted estimate identifies its retained offense and defense shares")
+def retention_inputs_are_auditable(continuity_context):
+    projections = continuity_context["projection_report"].projections
+    assert len(projections) == 2
+    assert {projection.offense_retention for projection in projections} == {0.4, 0.8}
+    assert {projection.defense_retention for projection in projections} == {0.4, 0.8}
+    assert all(projection.continuity_feature_cutoff_at == SIGNAL_CUTOFF for projection in projections)
+
+
+@then("the projection report identifies the opt-in model version")
+def projection_version_is_auditable(continuity_context):
+    assert continuity_context["projection_report"].model_version == MODEL_VERSION
