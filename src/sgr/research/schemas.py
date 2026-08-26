@@ -128,6 +128,47 @@ class TeamStrengthSnapshot(CanonicalRecord):
     strength: Decimal = Field(ge=0, le=1)
 
 
+class RosterContinuitySignal(CanonicalRecord):
+    """Opening-roster retention, weighted by prior-season snaps.
+
+    The roster snapshot is deliberately season-scoped and timestamped. A
+    caller may only use the signal when ``feature_cutoff_at`` is no later
+    than the prediction cutoff, which prevents a current roster from being
+    smuggled into a historical forecast.
+    """
+
+    entity_type: Literal["roster_continuity_signal"] = "roster_continuity_signal"
+    team_id: str
+    season_year: int = Field(ge=2000)
+    prior_season_year: int = Field(ge=2000)
+    feature_cutoff_at: datetime
+    offense_snaps_total: int = Field(gt=0)
+    offense_snaps_retained: int = Field(ge=0)
+    defense_snaps_total: int = Field(gt=0)
+    defense_snaps_retained: int = Field(ge=0)
+    offense_retention: Decimal = Field(ge=0, le=1)
+    defense_retention: Decimal = Field(ge=0, le=1)
+    roster_source_kind: Literal["historical_week1", "current"]
+    player_id_namespace: Literal["pfr"] = "pfr"
+
+    @model_validator(mode="after")
+    def retained_snaps_are_coherent(self) -> RosterContinuitySignal:
+        if self.prior_season_year != self.season_year - 1:
+            raise ValueError("Roster continuity must compare adjacent seasons.")
+        if self.offense_snaps_retained > self.offense_snaps_total:
+            raise ValueError("Retained offensive snaps cannot exceed total offensive snaps.")
+        if self.defense_snaps_retained > self.defense_snaps_total:
+            raise ValueError("Retained defensive snaps cannot exceed total defensive snaps.")
+        expected_offense = Decimal(self.offense_snaps_retained) / Decimal(self.offense_snaps_total)
+        expected_defense = Decimal(self.defense_snaps_retained) / Decimal(self.defense_snaps_total)
+        tolerance = Decimal("0.000001")
+        if abs(self.offense_retention - expected_offense) > tolerance:
+            raise ValueError("Offensive retention does not match retained/total snaps.")
+        if abs(self.defense_retention - expected_defense) > tolerance:
+            raise ValueError("Defensive retention does not match retained/total snaps.")
+        return self
+
+
 class KalshiEvent(CanonicalRecord):
     entity_type: Literal["kalshi_event"] = "kalshi_event"
     ticker: str = Field(min_length=1)
@@ -349,6 +390,7 @@ RECORD_TYPES: dict[str, type[CanonicalRecord]] = {
         Team,
         Game,
         TeamStrengthSnapshot,
+        RosterContinuitySignal,
         KalshiEvent,
         KalshiMarket,
         OrderBookSnapshot,
