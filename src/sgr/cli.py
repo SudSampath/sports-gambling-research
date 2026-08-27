@@ -17,6 +17,8 @@ from sgr.connectors.espn import EspnConnector
 from sgr.connectors.nflverse import NflverseConnector
 from sgr.research.candidate_comparison import run_candidate_comparison
 from sgr.research.closing_lines import ingest_closing_lines
+from sgr.research.context_effects_evaluation import run_context_effects_evaluation
+from sgr.research.game_context import ingest_game_contexts
 from sgr.research.evaluation import run_walk_forward_evaluation
 from sgr.research.historical import SeasonCoverageError, ingest_regular_season
 from sgr.research.holdout_backtest import DEFAULT_HOLDOUT_FRACTION, DEFAULT_HOLDOUT_SEED, run_holdout_backtest
@@ -694,6 +696,89 @@ def ingest_closing_lines_cmd(
             )
 
     asyncio.run(_run())
+
+
+@app.command(name="ingest-game-context")
+def ingest_game_context_cmd(
+    seasons: list[int] = typer.Option(
+        ..., "--season", help="Regular season year to ingest rest/venue/surface context for; repeat for multiple"
+    ),
+    refresh: bool = typer.Option(False, help="Bypass the local nflverse games.csv cache"),
+) -> None:
+    """Ingest rest days, divisional status, roof, and surface from nflverse
+    for the game-context effects ablation (SUD-127). Final observed
+    temp/wind are retained for provenance only -- never a pregame feature,
+    since this project has no archived pregame weather-forecast source."""
+
+    async def _run() -> None:
+        report = await ingest_game_contexts(NflverseConnector(), ResearchStore(), seasons, refresh=refresh)
+
+        table = Table(title="Game-context ingest coverage")
+        table.add_column("Season")
+        table.add_column("Games in source")
+        table.add_column("Rest")
+        table.add_column("Roof")
+        table.add_column("Surface")
+        table.add_column("Observed weather")
+        for year, coverage in sorted(report.by_season.items()):
+            table.add_row(
+                str(year),
+                str(coverage.games_in_source),
+                f"{coverage.rest_coverage}/{coverage.games_in_source}",
+                f"{coverage.roof_coverage}/{coverage.games_in_source}",
+                f"{coverage.surface_coverage}/{coverage.games_in_source}",
+                f"{coverage.observed_weather_coverage}/{coverage.games_in_source}",
+            )
+        console.print(table)
+        console.print(f"Game contexts written: {report.games_written}")
+
+    asyncio.run(_run())
+
+
+@app.command(name="evaluate-context-effects")
+def evaluate_context_effects_cmd(
+    training_seasons: list[int] = typer.Option(
+        ..., "--train-season", help="Training-fold season year; repeat for multiple"
+    ),
+    test_seasons: list[int] = typer.Option(
+        ..., "--test-season", help="Held-out test season year; repeat for multiple"
+    ),
+) -> None:
+    """Fit rest/venue-roof additive logit adjustments on training seasons
+    and compare baseline/rest-only/venue-only/combined on held-out test
+    seasons (SUD-127)."""
+    store = ResearchStore()
+    report = run_context_effects_evaluation(store, training_seasons, test_seasons)
+
+    console.print(
+        f"Fitted on {training_seasons[0]}-{training_seasons[-1]}: "
+        f"rest_coefficient={report.rest_coefficient:.4f}, dome_coefficient={report.dome_coefficient:.4f}"
+    )
+    table = Table(title=f"Context-effects ablation (test seasons {', '.join(str(y) for y in report.season_years)})")
+    table.add_column("Configuration")
+    table.add_column("N")
+    table.add_column("Excluded")
+    table.add_column("Brier")
+    table.add_column("Log loss")
+    for name, metrics in (
+        ("baseline", report.baseline),
+        ("rest-only", report.rest_only),
+        ("venue-only", report.venue_only),
+        ("combined", report.combined),
+    ):
+        table.add_row(
+            name,
+            str(metrics.sample_count),
+            str(metrics.excluded_count),
+            f"{metrics.brier_score:.4f}" if metrics.brier_score is not None else "-",
+            f"{metrics.log_loss:.4f}" if metrics.log_loss is not None else "-",
+        )
+    console.print(table)
+    console.print(
+        f"Context coverage: {report.context_coverage['games_with_context']}/"
+        f"{report.context_coverage['games_scored']} scored games had a GameContext record "
+        f"({report.games_missing_context} missing)"
+    )
 
 
 @app.command()
