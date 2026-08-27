@@ -173,10 +173,25 @@ def run_matchup_interactions_evaluation(
             pairs.append((sample.predicted_home_win_probability, feature_value, float(sample.actual_home_win)))
         return pairs
 
+    # fit_context_coefficient's own default bounds (-0.2, 0.2) are calibrated
+    # for context_effects.py's small-scale features (integer rest-day
+    # differentials, a +-1 dome indicator) -- a pass/rush net-EPA/play
+    # differential lives on the same scale efficiency_strength.py's slope
+    # fits against (bounds (0.5, 20.0)), roughly two orders of magnitude
+    # smaller in feature units than a rest-day count. Reusing the (-0.2, 0.2)
+    # default here would silently cap the fit at an arbitrary boundary
+    # rather than the true optimum -- confirmed by hand: an unmodified call
+    # against real 2015-2022 data saturated both coefficients at exactly
+    # 0.2000, the upper bound, rather than converging inside the interval.
+    MATCHUP_COEFFICIENT_BOUNDS = (-20.0, 20.0)
     pass_pairs = _training_pairs("pass")
     rush_pairs = _training_pairs("rush")
-    pass_coefficient = fit_context_coefficient(pass_pairs) if len(pass_pairs) >= 2 else 0.0
-    rush_coefficient = fit_context_coefficient(rush_pairs) if len(rush_pairs) >= 2 else 0.0
+    pass_coefficient = (
+        fit_context_coefficient(pass_pairs, bounds=MATCHUP_COEFFICIENT_BOUNDS) if len(pass_pairs) >= 2 else 0.0
+    )
+    rush_coefficient = (
+        fit_context_coefficient(rush_pairs, bounds=MATCHUP_COEFFICIENT_BOUNDS) if len(rush_pairs) >= 2 else 0.0
+    )
 
     baseline_samples, pass_samples, rush_samples, combined_samples, pass_fallbacks, rush_fallbacks = _build_samples(
         store, all_games, games_by_id, index, test_season_years,
