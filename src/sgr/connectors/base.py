@@ -10,6 +10,10 @@ import httpx
 class APIRequestError(RuntimeError):
     """A provider failure that intentionally excludes request credentials."""
 
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 class APIConnector:
     def __init__(
@@ -52,6 +56,7 @@ class APIConnector:
                 # propagate it to a CLI, log, or traceback.
                 raise APIRequestError(
                     f"GET {urlsplit(url).path} failed with HTTP status "
-                    f"{error.response.status_code}."
+                    f"{error.response.status_code}.",
+                    status_code=error.response.status_code,
                 ) from None
             return response.json()

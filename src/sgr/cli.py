@@ -14,6 +14,7 @@ from sgr.backtest import run_binary_backtest
 from sgr.config import ConfigurationError
 from sgr.connectors import KalshiConnector
 from sgr.connectors.espn import EspnConnector
+from sgr.connectors.theoddsapi import HISTORICAL_MARKETS, TheOddsAPIConnector, TheOddsAPIEntitlementError
 from sgr.research.candidate_comparison import run_candidate_comparison
 from sgr.research.evaluation import run_walk_forward_evaluation
 from sgr.research.historical import SeasonCoverageError, ingest_regular_season
@@ -33,6 +34,7 @@ from sgr.research.season_simulation import (
     simulate_season,
 )
 from sgr.research.storage import ResearchStore
+from sgr.research.timestamped_odds import normalize_historical_odds
 from sgr.research.win_totals import project_season_win_totals
 from sgr.models import NFLSeasonType
 
@@ -553,6 +555,49 @@ def compare_candidates(
             f"{m.accuracy:.1%}" if m.accuracy is not None else "-",
         )
     console.print(table)
+
+
+@app.command(name="capture-historical-odds")
+def capture_historical_odds_cmd(
+    snapshot_at: datetime = typer.Option(
+        ..., help="ISO-8601 UTC timestamp to request the closest at-or-before odds snapshot for"
+    ),
+    sport: str = typer.Option("americanfootball_nfl", help="The Odds API sport key"),
+    regions: str = typer.Option("us", help="Comma-separated The Odds API regions"),
+) -> None:
+    """Capture one point-in-time NFL odds snapshot from The Odds API's
+    historical endpoint (SUD-120). Requires a paid-plan credential -- fails
+    with a safe, credential-free error before writing anything if the
+    configured key has no historical entitlement. Never purchases a plan or
+    prompts for a credential; this repository does not have one."""
+    cutoff = snapshot_at.replace(tzinfo=timezone.utc) if snapshot_at.tzinfo is None else snapshot_at
+
+    async def _run() -> None:
+        connector = TheOddsAPIConnector()
+        try:
+            snapshot = await connector.historical_odds(sport, cutoff, regions=regions, markets=HISTORICAL_MARKETS)
+        except TheOddsAPIEntitlementError as error:
+            console.print(f"[red]{error}[/red]")
+            raise typer.Exit(code=2) from None
+
+        records, coverage = normalize_historical_odds(snapshot)
+        store = ResearchStore()
+        if records:
+            store.write(records)
+
+        table = Table(title=f"Historical odds snapshot ({sport}, requested {cutoff.isoformat()})")
+        table.add_column("Field")
+        table.add_column("Value")
+        table.add_row("Snapshot timestamp", str(coverage.snapshot_timestamp))
+        table.add_row("Previous timestamp", str(coverage.previous_timestamp))
+        table.add_row("Next timestamp", str(coverage.next_timestamp))
+        table.add_row("Events", str(coverage.events))
+        table.add_row("Observations written", str(coverage.observations_written))
+        table.add_row("Bookmakers", ", ".join(coverage.bookmakers) or "-")
+        table.add_row("Markets", ", ".join(coverage.markets) or "-")
+        console.print(table)
+
+    _run_configured_command(_run)
 
 
 if __name__ == "__main__":
