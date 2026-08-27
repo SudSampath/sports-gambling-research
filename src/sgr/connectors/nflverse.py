@@ -63,6 +63,29 @@ class NflverseConnector:
             "away_moneyline",
             "espn",
         },
+        "pbp": {
+            "game_id",
+            "season",
+            "season_type",
+            "week",
+            "posteam",
+            "defteam",
+            "qtr",
+            "down",
+            "ydstogo",
+            "yardline_100",
+            "yards_gained",
+            "score_differential",
+            "epa",
+            "success",
+            "pass",
+            "rush",
+            "sack",
+            "complete_pass",
+            "touchdown",
+            "cpoe",
+            "special_teams_play",
+        },
     }
 
     def __init__(
@@ -83,6 +106,9 @@ class NflverseConnector:
 
     async def current_rosters(self, season_year: int, *, refresh: bool = False) -> NflverseCsvSnapshot:
         return await self._dataset("rosters", season_year, refresh=refresh)
+
+    async def play_by_play(self, season_year: int, *, refresh: bool = False) -> NflverseCsvSnapshot:
+        return await self._dataset("pbp", season_year, refresh=refresh)
 
     async def games(self, *, refresh: bool = False) -> NflverseCsvSnapshot:
         """Fetch the single whole-history nflverse schedules/games release asset.
@@ -190,4 +216,6 @@ class NflverseConnector:
             return f"{cls.BASE_URL}/weekly_rosters/roster_weekly_{season_year}.csv"
         if dataset == "rosters":
             return f"{cls.BASE_URL}/rosters/roster_{season_year}.csv"
+        if dataset == "pbp":
+            return f"{cls.BASE_URL}/pbp/play_by_play_{season_year}.csv"
         raise ValueError(f"Unsupported nflverse dataset: {dataset!r}.")
