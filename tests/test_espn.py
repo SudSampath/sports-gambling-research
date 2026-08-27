@@ -134,6 +134,23 @@ def test_schema_drift_fails_with_typed_error(tmp_path):
         asyncio.run(connector.games_for_date(GAME_DATE))
 
 
+def test_empty_placeholder_event_is_skipped_not_raised(tmp_path):
+    """Live ESPN historical data has real archive noise: 2001 week 14's
+    scoreboard payload contained a completely empty `{}` event object
+    alongside 14 real games. There is nothing to recover from an empty
+    object, so it must not abort the whole week's otherwise-valid games."""
+    connector = EspnConnector(cache_dir=tmp_path)
+    payload = _fixture_payload()
+    payload["events"] = [*payload["events"], {}]
+    connector._write_snapshot(
+        GAME_DATE, payload, SOURCE_URL, datetime(2025, 9, 7, 18, tzinfo=timezone.utc)
+    )
+
+    games = asyncio.run(connector.games_for_date(GAME_DATE))
+
+    assert len(games) == len(_fixture_payload()["events"])
+
+
 def test_corrupt_cached_snapshot_fails_with_typed_error(tmp_path):
     connector = EspnConnector(cache_dir=tmp_path)
     snapshot = connector._write_snapshot(
