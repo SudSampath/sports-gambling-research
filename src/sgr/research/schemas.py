@@ -128,6 +128,51 @@ class TeamStrengthSnapshot(CanonicalRecord):
     strength: Decimal = Field(ge=0, le=1)
 
 
+class TimestampedOdds(CanonicalRecord):
+    """One bookmaker's quoted price for one market outcome, at a specific
+    historical snapshot time, from The Odds API (SUD-120).
+
+    There is deliberately no canonical ``game_id`` here: The Odds API's own
+    event ``id`` is a provider-random hex string with no shared key against
+    this project's ESPN-derived ``Game.id`` (unlike nflverse's games.csv,
+    which conveniently carries an ``espn`` column -- see ``ClosingLine``).
+    Matching a Odds-API event to a canonical ``Game`` is a fuzzy team/
+    kickoff-time join, explicitly out of this ticket's scope (SUD-37, Game
+    Market Matching). This record instead preserves the provider's own
+    event identity (``home_team``/``away_team``/``commence_time``) so a
+    later join can be added without re-ingesting.
+
+    ``event_time`` is ``provider_timestamp`` (the bookmaker's own
+    ``last_update``) -- the closest honest stand-in for "when this quote
+    was actually made," distinct from ``snapshot_timestamp`` (the
+    historical API's own snapshot time, which may be slightly later than
+    any individual bookmaker's last update) and ``retrieved_at`` (when this
+    project fetched it).
+    """
+
+    entity_type: Literal["timestamped_odds"] = "timestamped_odds"
+    provider_event_id: str = Field(min_length=1)
+    sport_key: str = Field(min_length=1)
+    home_team: str = Field(min_length=1)
+    away_team: str = Field(min_length=1)
+    commence_time: datetime
+    bookmaker_key: str = Field(min_length=1)
+    market_key: Literal["h2h", "spreads", "totals"]
+    outcome_name: str = Field(min_length=1)
+    point: Decimal | None = None
+    price: Decimal
+    provider_timestamp: datetime
+    snapshot_timestamp: datetime
+
+    @model_validator(mode="after")
+    def spreads_and_totals_require_a_point(self) -> TimestampedOdds:
+        if self.market_key in {"spreads", "totals"} and self.point is None:
+            raise ValueError(f"{self.market_key} outcomes require a point value.")
+        if self.market_key == "h2h" and self.point is not None:
+            raise ValueError("h2h outcomes do not carry a point value.")
+        return self
+
+
 class KalshiEvent(CanonicalRecord):
     entity_type: Literal["kalshi_event"] = "kalshi_event"
     ticker: str = Field(min_length=1)
@@ -349,6 +394,7 @@ RECORD_TYPES: dict[str, type[CanonicalRecord]] = {
         Team,
         Game,
         TeamStrengthSnapshot,
+        TimestampedOdds,
         KalshiEvent,
         KalshiMarket,
         OrderBookSnapshot,

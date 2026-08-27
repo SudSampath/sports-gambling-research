@@ -42,7 +42,7 @@ The current implementation PRD (draft) is at [docs/PRD.md](docs/PRD.md).
 ## What is included
 
 - Kalshi connector for market snapshots.
-- Sports API connectors (The Odds API + SportsData starter).
+- Sports API connectors (The Odds API + SportsData starter). The Odds API connector also supports point-in-time historical odds capture (`capture-historical-odds`, `timestamped_odds.py`) -- requires a paid-plan credential this repository does not have and will not purchase; fails safely with a credential-free error before writing anything if the configured key lacks historical entitlement, and is validated entirely through fixture-backed tests.
 - Strategy stubs:
   - `ValueStrategy`
   - `ArbitrageStrategy`
