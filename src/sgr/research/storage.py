@@ -27,6 +27,7 @@ TABLES = {
     "roster_continuity_signal": "roster_continuity_signals",
     "closing_line": "closing_lines",
     "team_game_efficiency": "team_game_efficiencies",
+    "game_context": "game_contexts",
     "kalshi_event": "kalshi_events",
     "kalshi_market": "kalshi_markets",
     "orderbook_snapshot": "orderbook_snapshots",
