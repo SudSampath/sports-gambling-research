@@ -281,6 +281,7 @@ def run_walk_forward_evaluation(
     *,
     exponent: float = DEFAULT_EXPONENT,
     include_baselines: bool = True,
+    apply_injury_adjustment: bool = True,
 ) -> WalkForwardReport:
     """Chronologically score every regular-season game in season_years.
 
@@ -294,6 +295,16 @@ def run_walk_forward_evaluation(
     Ties are excluded from the binary metrics (the model does not predict
     ties) and reported as their own exclusion reason, not folded into
     "abstained."
+
+    apply_injury_adjustment defaults on, matching the shipped default
+    model. It is provably a no-op for every completed game scored here:
+    injury_ingest.py never backfills availability reports against
+    completed games (SUD-91/109), so a completed game can never have a
+    qualifying report to act on -- but generate_forecast still spends time
+    scanning the full statline/availability tables to confirm that. SUD-122
+    passes False when evaluating many seasons at once (rolling_evaluation.py)
+    purely for tractability at that scale; the resulting probabilities are
+    bit-identical either way for any completed game.
     """
     all_games = [g for g in store.load_all("game") if isinstance(g, Game)]
     test_games = sorted(
@@ -330,7 +341,10 @@ def run_walk_forward_evaluation(
         actual_home_win = None if is_tie else (game.home_score or 0) > (game.away_score or 0)
 
         try:
-            forecast = generate_forecast(store, game.id, feature_cutoff_at=cutoff, exponent=exponent)
+            forecast = generate_forecast(
+                store, game.id, feature_cutoff_at=cutoff, exponent=exponent,
+                apply_injury_adjustment=apply_injury_adjustment,
+            )
             samples.append(
                 GameSample(
                     game.id, game.season_year, game.week, game.kickoff_at,
@@ -437,6 +451,8 @@ def select_exponent_on_training_fold(
     training_season_years: list[int],
     candidate_exponents: list[float],
     test_season_years: list[int],
+    *,
+    apply_injury_adjustment: bool = True,
 ) -> tuple[float, WalkForwardReport]:
     """Choose an exponent using only training-fold games, then score the
     chosen configuration on the held-out test fold.
@@ -445,6 +461,11 @@ def select_exponent_on_training_fold(
     never influence the chosen configuration": candidate scoring and
     selection happen entirely inside this function, over
     training_season_years only, before test_season_years is ever touched.
+
+    apply_injury_adjustment is forwarded to every run_walk_forward_evaluation
+    call below -- see that function's docstring for why SUD-122's
+    rolling_evaluation.py passes False (a provable no-op for completed
+    games, purely for tractability across many training seasons at once).
     """
     if set(training_season_years) & set(test_season_years):
         raise TrainTestLeakageError(
@@ -456,7 +477,8 @@ def select_exponent_on_training_fold(
     best_score = math.inf
     for candidate in candidate_exponents:
         training_report = run_walk_forward_evaluation(
-            store, training_season_years, exponent=candidate, include_baselines=False
+            store, training_season_years, exponent=candidate, include_baselines=False,
+            apply_injury_adjustment=apply_injury_adjustment,
         )
         score = training_report.overall.brier_score
         if score is not None and score < best_score:
@@ -466,5 +488,7 @@ def select_exponent_on_training_fold(
     if best_exponent is None:
         raise InsufficientHistoryError("No candidate exponent produced a scored training-fold result.")
 
-    test_report = run_walk_forward_evaluation(store, test_season_years, exponent=best_exponent)
+    test_report = run_walk_forward_evaluation(
+        store, test_season_years, exponent=best_exponent, apply_injury_adjustment=apply_injury_adjustment
+    )
     return best_exponent, test_report

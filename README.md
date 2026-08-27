@@ -13,6 +13,18 @@ A public, research-only Python project for evaluating NFL event-market signals. 
 
 The win-probability model is a Pythagorean expectation (`src/sgr/research/pythagorean.py`): each team's strength is `points_for^x / (points_for^x + points_against^x)`, blended toward its prior season early on so a small in-season sample doesn't dominate. Two teams' strengths combine into a win probability via the log5 formula, plus a home-field adjustment. Every forecast is generated from a required, explicit `feature_cutoff_at` and only ever reads games completed strictly before it (`src/sgr/research/evaluation.py` walk-forward evaluates this chronologically, so a rerun with a later cutoff never changes an earlier prediction).
 
+Local historical game coverage extends back to 2000 (the real floor of both
+the ESPN connector and every canonical schema entity's `season_year` field
+-- nflverse's own data goes back to 1999, but this project's ESPN-sourced
+`Game` records cannot). `rolling_evaluation.py` (`expand-evaluation` CLI
+command) runs a rolling-origin, season-held-out evaluation across many
+seasons at once rather than consulting a single season repeatedly -- see
+the [2026-08-27 research note](docs/research/expanded-evaluation-2026-08-27.md)
+for the real 2017-2025 results, a separate 2000-2010-trained robustness
+check, and the real data-quality bugs (schedule-era assumptions, ESPN
+archive gaps, and a shipped-model performance bug) found and fixed while
+building it.
+
 Built on top of that baseline:
 
 - **Win totals** (`win_totals.py`): each team's expected season win total is the exact sum of its per-game win probabilities (linearity of expectation, no simulation), with a variance-based confidence band.

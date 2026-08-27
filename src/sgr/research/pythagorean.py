@@ -344,6 +344,43 @@ def _cached_injury_inputs(store: ResearchStore) -> tuple[list[PlayerGameStatline
     return statlines, availability_reports
 
 
+# Same process-lifetime, database-path-keyed cache strategy as
+# _INJURY_INPUTS_CACHE above, for the same reason: SUD-122's rolling,
+# multi-season evaluation calls generate_forecast for every game in every
+# training fold, and every one of those calls used to reload and
+# Pydantic-parse the *entire* games table from scratch (plus a separate
+# per-call DuckDB round trip for the target game alone). With only the
+# original 4 seasons (~1,000 games) in the store this was slow but livable;
+# once SUD-122 backfilled 2000-2022 (~7,000 games), the same O(n) reload
+# happening inside an O(n)-game walk-forward loop made a single fold's
+# exponent selection effectively never finish. The target game is looked up
+# from this same cached list rather than a second DuckDB query.
+_ALL_GAMES_CACHE: dict[str, list[Game]] = {}
+_GAMES_BY_ID_CACHE: dict[str, dict[str, Game]] = {}
+
+
+def _cached_games(store: ResearchStore, game_id: str) -> tuple[list[Game], Game | None]:
+    """Return (all games, the requested game or None), refreshing the cache
+    at most once per call if game_id is not already in it.
+
+    A cache miss can mean either a genuinely invalid game_id, or that new
+    games were written to this store after the cache was last populated
+    (e.g. an incremental weekly-ingest pipeline forecasting games it just
+    wrote, or this project's own tests that write and forecast in a loop)
+    -- both cases refresh from the store rather than assuming the first is
+    true, so the list and the lookup dict always come from the same
+    refresh and can never disagree with each other about what exists.
+    """
+    cache_key = str(store.database_path)
+    games_by_id = _GAMES_BY_ID_CACHE.get(cache_key)
+    if games_by_id is None or game_id not in games_by_id:
+        games = [g for g in store.load_all("game") if isinstance(g, Game)]
+        games_by_id = {g.id: g for g in games}
+        _ALL_GAMES_CACHE[cache_key] = games
+        _GAMES_BY_ID_CACHE[cache_key] = games_by_id
+    return _ALL_GAMES_CACHE[cache_key], games_by_id.get(game_id)
+
+
 def generate_forecast(
     store: ResearchStore,
     game_id: str,
@@ -370,11 +407,9 @@ def generate_forecast(
     see player_backfill.py). Safe to default on for that reason: it cannot
     change any already-validated historical walk-forward result.
     """
-    game = store.load("game", game_id)
-    if not isinstance(game, Game):
+    all_games, game = _cached_games(store, game_id)
+    if game is None:
         raise InvalidScoringInputError(f"{game_id} is not a game record.")
-
-    all_games = [g for g in store.load_all("game") if isinstance(g, Game)]
 
     home_strength = compute_team_strength(
         all_games, game.home_team_id, game.season_year, feature_cutoff_at, exponent=exponent
