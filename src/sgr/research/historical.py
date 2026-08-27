@@ -8,10 +8,68 @@ from sgr.models import NFLGame, NFLSeasonType, NFLTeam
 from sgr.research.schemas import Game, RawSnapshotRef, Team, stable_record_id
 from sgr.research.storage import ResearchStore
 
-# The NFL has run an 18-week, 17-game-per-team regular season since 2021.
-# 32 teams x 17 games / 2 (each game counted once) = 272.
-REGULAR_SEASON_WEEKS = range(1, 19)
+# The NFL has run an 18-week, 17-game-per-team regular season since 2021
+# (32 teams x 17 games / 2 = 272). 1999-2020 ran a 17-week, 16-game-per-team
+# season (32 x 16 / 2 = 256) -- SUD-122 extends ingestion back to 1999, so
+# both eras must be handled explicitly rather than assuming the current one.
+SEVENTEEN_GAME_ERA_START_YEAR = 2021
+
+# The Houston Texans joined the league in 2002 as the 32nd franchise; the
+# Cleveland Browns' 1999 re-establishment already restored the count to 31
+# for 1999-2001. Getting this wrong makes a correct 31-team, 248-game 2000
+# or 2001 ingest look like a coverage failure.
+THIRTY_TWO_TEAM_ERA_START_YEAR = 2002
 EXPECTED_TEAM_COUNT = 32
+
+# One-off historical exceptions to the schedule-derived expected game count,
+# by season_year.
+# 2001: verified live (SUD-122) that ESPN's site API scoreboard archive
+# simply does not return a Dallas-Seattle game anywhere in its 2001
+# regular-season weeks -- every other of the 31 teams shows exactly 16
+# games played; only DAL and SEA each show 15. This is an absence in ESPN's
+# own historical archive, not a filtering bug here (confirmed: the game is
+# not present in the raw per-week payloads at all, under any week/status),
+# and not recoverable from this data source.
+# 2022: the Week 17 Bills-Bengals game was suspended after Damar Hamlin's
+# on-field cardiac arrest (2023-01-02) and never resumed; the NFL ruled it
+# would not be replayed, so that season's official regular season is 271
+# games, not the era-standard 272 -- a real schedule fact, not a
+# data-quality defect this ingest should keep failing on.
+SEASON_GAME_COUNT_EXCEPTIONS = {2001: 247, 2022: 271}
+
+# ESPN's historical archive keeps a permanent placeholder event, under its
+# original event ID, for a game that was rescheduled to a different date (and
+# a different event ID) or officially cancelled -- it never transitions to
+# STATUS_FINAL. Found live: 2014 week 12 BUF@NYJ (STATUS_POSTPONED, moved to
+# Detroit and replayed under a different event ID after the "Snowvember"
+# lake-effect blizzard); 2017 week 1 MIA@TB (STATUS_POSTPONED, replayed in
+# week 11 under a different event ID after Hurricane Irma); 2022 week 17
+# CIN@BUF (STATUS_CANCELED, the Damar Hamlin game, never replayed at all).
+# These are excluded from both the captured and expected counts for a
+# require_completed pass -- they are not a data-quality defect to keep
+# failing on, and the real replayed game (a different event ID) is still
+# captured normally.
+PERMANENTLY_UNCOMPLETED_STATUSES = frozenset({"STATUS_POSTPONED", "STATUS_CANCELED"})
+
+
+def expected_regular_season_weeks(season_year: int) -> range:
+    return range(1, 19) if season_year >= SEVENTEEN_GAME_ERA_START_YEAR else range(1, 18)
+
+
+def expected_regular_season_games(season_year: int) -> int:
+    if season_year in SEASON_GAME_COUNT_EXCEPTIONS:
+        return SEASON_GAME_COUNT_EXCEPTIONS[season_year]
+    games_per_team = 17 if season_year >= SEVENTEEN_GAME_ERA_START_YEAR else 16
+    return expected_team_count(season_year) * games_per_team // 2
+
+
+def expected_team_count(season_year: int) -> int:
+    return 32 if season_year >= THIRTY_TWO_TEAM_ERA_START_YEAR else 31
+
+
+# Kept for existing 17-game/32-team-era (2021+) callers/tests; new code
+# should call expected_regular_season_games/expected_team_count(season_year)
+# so pre-2021/pre-2002 seasons are correct.
 EXPECTED_REGULAR_SEASON_GAMES = 272
 
 
@@ -34,7 +92,8 @@ class SeasonCoverageError(HistoricalIngestError):
             f"{report.teams_captured}/{report.teams_expected} teams, "
             f"{len(report.duplicate_event_ids)} duplicate event IDs, "
             f"{len(report.inconsistent_event_ids)} inconsistent-field events, "
-            f"{len(report.incomplete_event_ids)} incomplete games."
+            f"{len(report.incomplete_event_ids)} incomplete games "
+            f"({len(report.rescheduled_or_canceled_event_ids)} rescheduled/canceled excluded)."
         )
 
 
@@ -51,6 +110,7 @@ class SeasonCoverageReport:
     duplicate_event_ids: tuple[str, ...] = field(default_factory=tuple)
     inconsistent_event_ids: tuple[str, ...] = field(default_factory=tuple)
     incomplete_event_ids: tuple[str, ...] = field(default_factory=tuple)
+    rescheduled_or_canceled_event_ids: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def is_complete(self) -> bool:
@@ -134,7 +194,7 @@ async def fetch_regular_season(
     here — it is out of this ticket's scope, flagged as a known issue.
     """
     games: list[NFLGame] = []
-    for week in REGULAR_SEASON_WEEKS:
+    for week in expected_regular_season_weeks(season_year):
         games.extend(
             await connector.games_for_week(
                 season_year,
@@ -157,12 +217,20 @@ def build_coverage_report(
     Duplicate event IDs and games with inconsistent season/week metadata are
     excluded from the accepted set and listed on the report rather than
     silently kept — "impossible scores" and non-boolean completion states
-    are already rejected earlier, inside EspnConnector's normalization.
+    are already rejected earlier, inside EspnConnector's normalization. A
+    game rescheduled to a different date (a different event ID) or
+    officially cancelled keeps a permanent STATUS_POSTPONED/STATUS_CANCELED
+    placeholder under its original event ID in ESPN's historical archive
+    (PERMANENTLY_UNCOMPLETED_STATUSES); for a require_completed pass those
+    placeholders are excluded from the accepted set entirely rather than
+    counted as a game that failed to complete -- the real game, if replayed,
+    is still captured normally under its own event ID.
     """
     accepted: list[NFLGame] = []
     seen_event_ids: set[str] = set()
     duplicate_event_ids: list[str] = []
     inconsistent_event_ids: list[str] = []
+    rescheduled_or_canceled_event_ids: list[str] = []
 
     for game in games:
         if game.season_year != season_year or game.season_type != NFLSeasonType.REGULAR:
@@ -172,6 +240,9 @@ def build_coverage_report(
             duplicate_event_ids.append(game.event_id)
             continue
         seen_event_ids.add(game.event_id)
+        if require_completed and game.status in PERMANENTLY_UNCOMPLETED_STATUSES:
+            rescheduled_or_canceled_event_ids.append(game.event_id)
+            continue
         accepted.append(game)
 
     teams = {game.home_team.espn_team_id for game in accepted} | {
@@ -185,12 +256,13 @@ def build_coverage_report(
         season_year=season_year,
         require_completed=require_completed,
         games_captured=len(accepted),
-        games_expected=EXPECTED_REGULAR_SEASON_GAMES,
+        games_expected=expected_regular_season_games(season_year),
         teams_captured=len(teams),
-        teams_expected=EXPECTED_TEAM_COUNT,
+        teams_expected=expected_team_count(season_year),
         duplicate_event_ids=tuple(duplicate_event_ids),
         inconsistent_event_ids=tuple(inconsistent_event_ids),
         incomplete_event_ids=tuple(incomplete_event_ids),
+        rescheduled_or_canceled_event_ids=tuple(rescheduled_or_canceled_event_ids),
     )
     return accepted, report
 

@@ -17,6 +17,7 @@ from sgr.connectors.espn import EspnConnector
 from sgr.connectors.nflverse import NflverseConnector
 from sgr.research.candidate_comparison import run_candidate_comparison
 from sgr.research.closing_lines import ingest_closing_lines
+from sgr.research.efficiency_evaluation import select_efficiency_coefficients_on_training_fold
 from sgr.research.play_level_features import ingest_play_level_features
 from sgr.research.evaluation import run_walk_forward_evaluation
 from sgr.research.historical import SeasonCoverageError, ingest_regular_season
@@ -31,6 +32,12 @@ from sgr.research.roster_continuity import (
     project_season_win_totals_with_roster_continuity,
 )
 from sgr.research.roster_continuity_evaluation import run_roster_continuity_evaluation
+from sgr.research.rolling_evaluation import (
+    DEFAULT_ROLLING_WINDOW_SEASONS,
+    PRIMARY_TEST_SEASONS,
+    robustness_evaluation,
+    rolling_origin_evaluation,
+)
 from sgr.research.schemas import Game, Team
 from sgr.research.season_simulation import (
     DEFAULT_N_SIMULATIONS,
@@ -757,6 +764,130 @@ def compare_candidates(
             f"{m.accuracy:.1%}" if m.accuracy is not None else "-",
         )
     console.print(table)
+
+
+@app.command(name="expand-evaluation")
+def expand_evaluation_cmd(
+    window: str = typer.Option("expanding", help="Training window: 'expanding' or 'rolling'"),
+    rolling_window_seasons: int = typer.Option(
+        DEFAULT_ROLLING_WINDOW_SEASONS, help="Seasons of history used when --window=rolling"
+    ),
+    test_seasons: list[int] = typer.Option(
+        list(PRIMARY_TEST_SEASONS),
+        "--test-season",
+        help="Rolling-origin test season; repeat for multiple (default: 2017-2025)",
+    ),
+    robustness: bool = typer.Option(
+        False, "--robustness", help="Also run the 2000-2010-trained, 2011-2016-tested stable-parameter check"
+    ),
+) -> None:
+    """Rolling-origin, season-held-out evaluation across many seasons (SUD-122).
+
+    2025 is labeled validation, not a pristine holdout; 2026 can never enter
+    a fold as a test season or training season."""
+    store = ResearchStore()
+    report = rolling_origin_evaluation(
+        store, test_seasons=tuple(test_seasons), window=window, rolling_window_seasons=rolling_window_seasons
+    )
+
+    console.print(
+        f"[dim]Validation season: {report.validation_season} (already consulted by earlier "
+        f"candidate decisions). Prospective lockbox: {report.lockbox_season} (reserved, never "
+        f"scored here).[/dim]"
+    )
+    table = Table(title=f"Rolling-origin evaluation ({report.window} window)")
+    table.add_column("Test season")
+    table.add_column("Train seasons")
+    table.add_column("Exponent")
+    table.add_column("N")
+    table.add_column("Excluded")
+    table.add_column("Brier")
+    table.add_column("Margin MAE")
+    for fold in report.folds:
+        table.add_row(
+            str(fold.test_season),
+            f"{fold.training_seasons[0]}-{fold.training_seasons[-1]} ({len(fold.training_seasons)})",
+            f"{fold.chosen_exponent:.3f}",
+            str(fold.game_metrics.sample_count),
+            str(fold.game_metrics.excluded_count),
+            f"{fold.game_metrics.brier_score:.4f}" if fold.game_metrics.brier_score is not None else "-",
+            f"{fold.margin_metrics.mean_absolute_error:.2f}"
+            if fold.margin_metrics.mean_absolute_error is not None
+            else "-",
+        )
+    console.print(table)
+    console.print(
+        f"Overall: N={report.overall.sample_count}, excluded={report.overall.excluded_count}, "
+        f"Brier={report.overall.brier_score:.4f}" if report.overall.brier_score is not None else "Overall: no scored games"
+    )
+    if report.season_clustered_brier_ci is not None:
+        lo, hi = report.season_clustered_brier_ci
+        console.print(f"Season-clustered Brier 95% CI: [{lo:.4f}, {hi:.4f}]")
+    if report.overall.exclusion_reasons:
+        console.print(f"Exclusion reasons: {report.overall.exclusion_reasons}")
+
+    if robustness:
+        robustness_report = robustness_evaluation(store)
+        console.print(
+            f"\n[dim]Robustness check: trained once on "
+            f"{robustness_report.training_seasons[0]}-{robustness_report.training_seasons[-1]}, "
+            f"tested on {', '.join(str(f.test_season) for f in robustness_report.folds)} "
+            f"(kept separate from the primary rolling analysis).[/dim]"
+        )
+        console.print(
+            f"Robustness overall: N={robustness_report.overall.sample_count}, "
+            f"Brier={robustness_report.overall.brier_score:.4f}"
+            if robustness_report.overall.brier_score is not None
+            else "Robustness overall: no scored games"
+        )
+
+
+@app.command(name="evaluate-efficiency-strength")
+def evaluate_efficiency_strength_cmd(
+    training_seasons: list[int] = typer.Option(
+        ..., "--train-season", help="Training-fold season year; repeat for multiple"
+    ),
+    test_season: int = typer.Option(..., help="Held-out test season year"),
+) -> None:
+    """Fit the play-level efficiency-strength model on training seasons and
+    compare it with the shipped Pythagorean baseline on a held-out test
+    season (SUD-124). An independently priced football model -- never reads
+    market/betting-line data."""
+    store = ResearchStore()
+    slope, points_per_epa, report = select_efficiency_coefficients_on_training_fold(
+        store, training_seasons, [test_season]
+    )
+
+    console.print(
+        f"Fitted on {training_seasons[0]}-{training_seasons[-1]}: "
+        f"slope={slope:.3f}, points_per_epa={points_per_epa:.2f}"
+    )
+    table = Table(title=f"Efficiency-strength vs. shipped baseline (test season {test_season})")
+    table.add_column("Model")
+    table.add_column("N")
+    table.add_column("Excluded")
+    table.add_column("Brier")
+    table.add_column("Log loss")
+    table.add_column("Margin MAE")
+    table.add_row(
+        report.model_version,
+        str(report.efficiency_metrics.sample_count),
+        str(report.efficiency_metrics.excluded_count),
+        f"{report.efficiency_metrics.brier_score:.4f}" if report.efficiency_metrics.brier_score is not None else "-",
+        f"{report.efficiency_metrics.log_loss:.4f}" if report.efficiency_metrics.log_loss is not None else "-",
+        f"{report.efficiency_margin_mae:.2f}" if report.efficiency_margin_mae is not None else "-",
+    )
+    table.add_row(
+        report.baseline_model_version,
+        str(report.baseline_metrics.sample_count),
+        str(report.baseline_metrics.excluded_count),
+        f"{report.baseline_metrics.brier_score:.4f}" if report.baseline_metrics.brier_score is not None else "-",
+        f"{report.baseline_metrics.log_loss:.4f}" if report.baseline_metrics.log_loss is not None else "-",
+        "-",
+    )
+    console.print(table)
+    if report.efficiency_metrics.exclusion_reasons:
+        console.print(f"Efficiency exclusion reasons: {report.efficiency_metrics.exclusion_reasons}")
 
 
 if __name__ == "__main__":

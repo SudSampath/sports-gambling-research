@@ -21,6 +21,18 @@ probability gain was not statistically significant. See the
 the `ingest-roster-continuity`, `compare-roster-continuity`, and
 `project-roster-continuity` CLI commands.
 
+Local historical game coverage extends back to 2000 (the real floor of both
+the ESPN connector and every canonical schema entity's `season_year` field
+-- nflverse's own data goes back to 1999, but this project's ESPN-sourced
+`Game` records cannot). `rolling_evaluation.py` (`expand-evaluation` CLI
+command) runs a rolling-origin, season-held-out evaluation across many
+seasons at once rather than consulting a single season repeatedly -- see
+the [2026-08-27 research note](docs/research/expanded-evaluation-2026-08-27.md)
+for the real 2017-2025 results, a separate 2000-2010-trained robustness
+check, and the real data-quality bugs (schedule-era assumptions, ESPN
+archive gaps, and a shipped-model performance bug) found and fixed while
+building it.
+
 Built on top of that baseline:
 
 - **Win totals** (`win_totals.py`): each team's expected season win total is the exact sum of its per-game win probabilities (linearity of expectation, no simulation), with a variance-based confidence band.
@@ -29,6 +41,10 @@ Built on top of that baseline:
 - **Player-impact / injuries** (`player_impact.py`, `injury_adjustment.py`): a replacement-aware estimate of a missing usual starter's win-probability impact, wired into every forecast by default. It only fires when a player resolves to a *confirmed* OUT/INACTIVE status from independently corroborating sources (a single uncorroborated report, e.g. from one provider, is treated as unconfirmed and does not trigger it) -- see `injury_ingest.py` for how current injury reports are fetched, always for not-yet-played games only, never backfilled against completed ones (that would misrepresent today's report as having been knowable in the past).
 - **Closing-line market benchmark** (`closing_lines.py`): nflverse's free closing spread, total, and moneyline for every 1999-2025 regular-season game, normalized into a `ClosingLine` record and joined to its canonical `Game` by recomputing the same stable ID from the shared ESPN event ID (not a fuzzy team/week match). `home_spread` is signed the same way as `home_score - away_score`: positive means the home team was favored, negative means the home team was the underdog -- verified against real 2024 games, where a negative moneyline (home favorite) always pairs with a positive `spread_line`. Missing moneylines (common before ~2010) stay `None` rather than being inferred from the spread. This is a benchmark-only dataset: `generate_forecast` never reads it, so it cannot enter the independent fair-price model's own features -- see the `ingest-closing-lines` CLI command.
 - **Play-level team-game efficiency** (`play_level_features.py`): nflverse play-by-play (EPA, success rate, CPOE, down/distance, explosive plays, red zone, sacks, special teams) aggregated into one offense-perspective `TeamGameEfficiency` record per team per game, joined to the canonical `Game` the same ESPN-event-ID way `ClosingLine` is. There are no separate "defense" fields -- a team's defense is exactly its opponent's offense in the same game, so a caller joins on `opponent_team_id` rather than reading a second, independently derived copy of the same numbers. Both an unfiltered and a garbage-time-excluded variant (4th quarter/OT, 3+ score differential) are written for every team-game, so ablations don't have to re-ingest. Data layer only: fits no coefficients and does not change any forecast -- see the `ingest-play-level-features` CLI command.
+
+### Researched but not adopted
+
+- **Play-level efficiency-strength model** (`efficiency_strength.py`, `efficiency_evaluation.py`): a shrinkage-based, opponent-adjusted offense/defense rating built from play-level EPA, with fitted win-probability and expected-margin transforms. Evaluated on three real rolling seasons (2023-2025, trained on 2015 forward each time) and **rejected as the default**: the shipped Pythagorean baseline wins on Brier score, log loss, and margin MAE in every test season. Kept as an opt-in, fully tested research variant rather than discarded -- see the [2026-08-27 research note](docs/research/efficiency-strength-2026-08-27.md) for the full comparison table and the `evaluate-efficiency-strength` CLI command.
 
 ### What was tried and did not help
 

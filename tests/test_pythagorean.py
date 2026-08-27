@@ -424,3 +424,50 @@ def test_injury_adjustment_inputs_are_loaded_once_per_store_not_once_per_call(tm
 
     assert call_counts.get("player_game_statline", 0) == 1
     assert call_counts.get("availability_report", 0) == 1
+
+
+def test_repeated_forecasts_for_the_same_game_do_not_reload_the_games_table(tmp_path, monkeypatch):
+    """SUD-122: generate_forecast used to reload and re-parse the *entire*
+    games table from scratch on every single call, with no cache at all
+    (unlike the injury inputs above). Harmless with ~1,000 games; once
+    SUD-122 backfilled ~7,000, this made walk-forward evaluation over many
+    training seasons effectively never finish. Repeated calls for the same
+    game must reuse one load; a call for a game written after the cache was
+    populated must still find it (not silently treat it as invalid)."""
+    store = ResearchStore(root=tmp_path / "store")
+    _seed_two_teams(store, home="BUF", away="MIA", season_year=2025)
+
+    call_counts: dict[str, int] = {}
+    original_load_all = ResearchStore.load_all
+
+    def counting_load_all(self, entity_type):
+        call_counts[entity_type] = call_counts.get(entity_type, 0) + 1
+        return original_load_all(self, entity_type)
+
+    monkeypatch.setattr(ResearchStore, "load_all", counting_load_all)
+
+    cutoff = _week(6) - timedelta(hours=1)
+    matchup = make_game(
+        event_id="repeat-cache-target", season_year=2025, week=6, home_abbr="BUF", away_abbr="MIA",
+        kickoff_at=_week(6), home_score=None, away_score=None, completed=False,
+    )
+    store.write([matchup])
+
+    for _ in range(5):
+        forecast = generate_forecast(store, matchup.id, feature_cutoff_at=cutoff, apply_injury_adjustment=False)
+        assert 0.0 <= float(forecast.home_win_probability) <= 1.0
+    assert call_counts.get("game", 0) == 1
+
+    # A game written after the cache was populated must still be found --
+    # the cache must refresh on a genuine miss, not treat every miss as an
+    # invalid game_id.
+    later_matchup = make_game(
+        event_id="repeat-cache-later", season_year=2025, week=6, home_abbr="BUF", away_abbr="MIA",
+        kickoff_at=_week(6), home_score=None, away_score=None, completed=False,
+    )
+    store.write([later_matchup])
+    later_forecast = generate_forecast(
+        store, later_matchup.id, feature_cutoff_at=cutoff, apply_injury_adjustment=False
+    )
+    assert 0.0 <= float(later_forecast.home_win_probability) <= 1.0
+    assert call_counts.get("game", 0) == 2
