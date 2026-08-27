@@ -29,6 +29,10 @@ Two further adjustments were researched, implemented, and walk-forward evaluated
 
 A combined "blend" of injuries + turnover + SOS was also evaluated (`candidate_comparison.py`) and does not beat the injury adjustment alone, since SOS's damage outweighs the other two. See the closed SUD-108/109/110/111 tickets for the full real-data comparison tables and reasoning.
 
+### Data-source decisions
+
+nflverse's `draft_picks`, `trades`, and `contracts` releases are viable, free sources for a future position-weighted personnel-additions signal -- see the [2026-08-27 source spike](docs/research/personnel-additions-2026-08-27.md) for the schemas verified live and a critical point-in-time trap found in `draft_picks`: its `allpro`/`w_av`/`car_av`/games/every stat column is a cumulative **career** total through each player's final season, not a point-in-time value as of the draft -- unsafe to use directly as a preseason feature. Not implemented yet; this is source research only.
+
 ## Non-goals for the first milestone
 
 - Real-money order submission, modification, cancellation, or settlement.
