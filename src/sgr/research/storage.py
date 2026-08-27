@@ -25,6 +25,7 @@ TABLES = {
     "game": "games",
     "team_strength_snapshot": "team_strength_snapshots",
     "roster_continuity_signal": "roster_continuity_signals",
+    "closing_line": "closing_lines",
     "kalshi_event": "kalshi_events",
     "kalshi_market": "kalshi_markets",
     "orderbook_snapshot": "orderbook_snapshots",
@@ -145,8 +146,17 @@ class ResearchStore:
 
     def load_all(self, entity_type: str) -> list[CanonicalRecord]:
         """Load every record of one entity type, for callers that need to filter
-        in Python (e.g. by kickoff time) rather than by an indexed SQL column."""
+        in Python (e.g. by kickoff time) rather than by an indexed SQL column.
+
+        Returns [] both when the database file has never been created yet
+        (nothing has ever been written to this store) and when the file
+        exists but this entity's table hasn't -- a caller ingesting one
+        entity type (e.g. closing lines) before any of another type (e.g.
+        games) has ever been written must see an empty list, not a crash.
+        """
         table = TABLES[entity_type]
+        if not self.database_path.exists():
+            return []
         with duckdb.connect(str(self.database_path), read_only=True) as connection:
             try:
                 rows = connection.execute(f"SELECT payload_json FROM {table}").fetchall()

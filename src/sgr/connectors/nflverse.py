@@ -48,6 +48,21 @@ class NflverseConnector:
         },
         "weekly_rosters": {"season", "week", "game_type", "team", "status", "pfr_id"},
         "rosters": {"season", "team", "status", "pfr_id"},
+        "games": {
+            "game_id",
+            "season",
+            "game_type",
+            "week",
+            "home_team",
+            "away_team",
+            "home_score",
+            "away_score",
+            "spread_line",
+            "total_line",
+            "home_moneyline",
+            "away_moneyline",
+            "espn",
+        },
     }
 
     def __init__(
@@ -69,11 +84,28 @@ class NflverseConnector:
     async def current_rosters(self, season_year: int, *, refresh: bool = False) -> NflverseCsvSnapshot:
         return await self._dataset("rosters", season_year, refresh=refresh)
 
+    async def games(self, *, refresh: bool = False) -> NflverseCsvSnapshot:
+        """Fetch the single whole-history nflverse schedules/games release asset.
+
+        Unlike snap_counts/weekly_rosters/rosters, games.csv is published as
+        one file covering every season (1999-present), not one file per
+        season, so it is cached under its own dataset directory with no
+        season subdirectory.
+        """
+        return await self._fetch_csv(
+            "games", self.cache_dir / "games", f"{self.BASE_URL}/schedules/games.csv", refresh=refresh
+        )
+
     async def _dataset(self, dataset: str, season_year: int, *, refresh: bool) -> NflverseCsvSnapshot:
         if isinstance(season_year, bool) or not isinstance(season_year, int) or season_year < 2000:
             raise ValueError("season_year must be an integer greater than or equal to 2000.")
         source_url = self._source_url(dataset, season_year)
         directory = self.cache_dir / dataset / str(season_year)
+        return await self._fetch_csv(dataset, directory, source_url, refresh=refresh)
+
+    async def _fetch_csv(
+        self, dataset: str, directory: Path, source_url: str, *, refresh: bool = False
+    ) -> NflverseCsvSnapshot:
         cached = sorted(directory.glob("*.csv")) if directory.exists() else []
         if cached and not refresh:
             path = cached[-1]
