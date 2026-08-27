@@ -17,6 +17,8 @@ from sgr.connectors.espn import EspnConnector
 from sgr.connectors.nflverse import NflverseConnector
 from sgr.research.candidate_comparison import run_candidate_comparison
 from sgr.research.closing_lines import ingest_closing_lines
+from sgr.research.context_effects_evaluation import run_context_effects_evaluation
+from sgr.research.game_context import ingest_game_contexts
 from sgr.research.evaluation import run_walk_forward_evaluation
 from sgr.research.historical import SeasonCoverageError, ingest_regular_season
 from sgr.research.holdout_backtest import DEFAULT_HOLDOUT_FRACTION, DEFAULT_HOLDOUT_SEED, run_holdout_backtest
@@ -30,6 +32,12 @@ from sgr.research.roster_continuity import (
     project_season_win_totals_with_roster_continuity,
 )
 from sgr.research.roster_continuity_evaluation import run_roster_continuity_evaluation
+from sgr.research.rolling_evaluation import (
+    DEFAULT_ROLLING_WINDOW_SEASONS,
+    PRIMARY_TEST_SEASONS,
+    robustness_evaluation,
+    rolling_origin_evaluation,
+)
 from sgr.research.schemas import Game, Team
 from sgr.research.season_simulation import (
     DEFAULT_N_SIMULATIONS,
@@ -696,6 +704,89 @@ def ingest_closing_lines_cmd(
     asyncio.run(_run())
 
 
+@app.command(name="ingest-game-context")
+def ingest_game_context_cmd(
+    seasons: list[int] = typer.Option(
+        ..., "--season", help="Regular season year to ingest rest/venue/surface context for; repeat for multiple"
+    ),
+    refresh: bool = typer.Option(False, help="Bypass the local nflverse games.csv cache"),
+) -> None:
+    """Ingest rest days, divisional status, roof, and surface from nflverse
+    for the game-context effects ablation (SUD-127). Final observed
+    temp/wind are retained for provenance only -- never a pregame feature,
+    since this project has no archived pregame weather-forecast source."""
+
+    async def _run() -> None:
+        report = await ingest_game_contexts(NflverseConnector(), ResearchStore(), seasons, refresh=refresh)
+
+        table = Table(title="Game-context ingest coverage")
+        table.add_column("Season")
+        table.add_column("Games in source")
+        table.add_column("Rest")
+        table.add_column("Roof")
+        table.add_column("Surface")
+        table.add_column("Observed weather")
+        for year, coverage in sorted(report.by_season.items()):
+            table.add_row(
+                str(year),
+                str(coverage.games_in_source),
+                f"{coverage.rest_coverage}/{coverage.games_in_source}",
+                f"{coverage.roof_coverage}/{coverage.games_in_source}",
+                f"{coverage.surface_coverage}/{coverage.games_in_source}",
+                f"{coverage.observed_weather_coverage}/{coverage.games_in_source}",
+            )
+        console.print(table)
+        console.print(f"Game contexts written: {report.games_written}")
+
+    asyncio.run(_run())
+
+
+@app.command(name="evaluate-context-effects")
+def evaluate_context_effects_cmd(
+    training_seasons: list[int] = typer.Option(
+        ..., "--train-season", help="Training-fold season year; repeat for multiple"
+    ),
+    test_seasons: list[int] = typer.Option(
+        ..., "--test-season", help="Held-out test season year; repeat for multiple"
+    ),
+) -> None:
+    """Fit rest/venue-roof additive logit adjustments on training seasons
+    and compare baseline/rest-only/venue-only/combined on held-out test
+    seasons (SUD-127)."""
+    store = ResearchStore()
+    report = run_context_effects_evaluation(store, training_seasons, test_seasons)
+
+    console.print(
+        f"Fitted on {training_seasons[0]}-{training_seasons[-1]}: "
+        f"rest_coefficient={report.rest_coefficient:.4f}, dome_coefficient={report.dome_coefficient:.4f}"
+    )
+    table = Table(title=f"Context-effects ablation (test seasons {', '.join(str(y) for y in report.season_years)})")
+    table.add_column("Configuration")
+    table.add_column("N")
+    table.add_column("Excluded")
+    table.add_column("Brier")
+    table.add_column("Log loss")
+    for name, metrics in (
+        ("baseline", report.baseline),
+        ("rest-only", report.rest_only),
+        ("venue-only", report.venue_only),
+        ("combined", report.combined),
+    ):
+        table.add_row(
+            name,
+            str(metrics.sample_count),
+            str(metrics.excluded_count),
+            f"{metrics.brier_score:.4f}" if metrics.brier_score is not None else "-",
+            f"{metrics.log_loss:.4f}" if metrics.log_loss is not None else "-",
+        )
+    console.print(table)
+    console.print(
+        f"Context coverage: {report.context_coverage['games_with_context']}/"
+        f"{report.context_coverage['games_scored']} scored games had a GameContext record "
+        f"({report.games_missing_context} missing)"
+    )
+
+
 @app.command()
 def compare_candidates(
     seasons: list[int] = typer.Option(..., "--season", help="Completed season year to evaluate; repeat for multiple"),
@@ -720,6 +811,82 @@ def compare_candidates(
             f"{m.accuracy:.1%}" if m.accuracy is not None else "-",
         )
     console.print(table)
+
+
+@app.command(name="expand-evaluation")
+def expand_evaluation_cmd(
+    window: str = typer.Option("expanding", help="Training window: 'expanding' or 'rolling'"),
+    rolling_window_seasons: int = typer.Option(
+        DEFAULT_ROLLING_WINDOW_SEASONS, help="Seasons of history used when --window=rolling"
+    ),
+    test_seasons: list[int] = typer.Option(
+        list(PRIMARY_TEST_SEASONS),
+        "--test-season",
+        help="Rolling-origin test season; repeat for multiple (default: 2017-2025)",
+    ),
+    robustness: bool = typer.Option(
+        False, "--robustness", help="Also run the 2000-2010-trained, 2011-2016-tested stable-parameter check"
+    ),
+) -> None:
+    """Rolling-origin, season-held-out evaluation across many seasons (SUD-122).
+
+    2025 is labeled validation, not a pristine holdout; 2026 can never enter
+    a fold as a test season or training season."""
+    store = ResearchStore()
+    report = rolling_origin_evaluation(
+        store, test_seasons=tuple(test_seasons), window=window, rolling_window_seasons=rolling_window_seasons
+    )
+
+    console.print(
+        f"[dim]Validation season: {report.validation_season} (already consulted by earlier "
+        f"candidate decisions). Prospective lockbox: {report.lockbox_season} (reserved, never "
+        f"scored here).[/dim]"
+    )
+    table = Table(title=f"Rolling-origin evaluation ({report.window} window)")
+    table.add_column("Test season")
+    table.add_column("Train seasons")
+    table.add_column("Exponent")
+    table.add_column("N")
+    table.add_column("Excluded")
+    table.add_column("Brier")
+    table.add_column("Margin MAE")
+    for fold in report.folds:
+        table.add_row(
+            str(fold.test_season),
+            f"{fold.training_seasons[0]}-{fold.training_seasons[-1]} ({len(fold.training_seasons)})",
+            f"{fold.chosen_exponent:.3f}",
+            str(fold.game_metrics.sample_count),
+            str(fold.game_metrics.excluded_count),
+            f"{fold.game_metrics.brier_score:.4f}" if fold.game_metrics.brier_score is not None else "-",
+            f"{fold.margin_metrics.mean_absolute_error:.2f}"
+            if fold.margin_metrics.mean_absolute_error is not None
+            else "-",
+        )
+    console.print(table)
+    console.print(
+        f"Overall: N={report.overall.sample_count}, excluded={report.overall.excluded_count}, "
+        f"Brier={report.overall.brier_score:.4f}" if report.overall.brier_score is not None else "Overall: no scored games"
+    )
+    if report.season_clustered_brier_ci is not None:
+        lo, hi = report.season_clustered_brier_ci
+        console.print(f"Season-clustered Brier 95% CI: [{lo:.4f}, {hi:.4f}]")
+    if report.overall.exclusion_reasons:
+        console.print(f"Exclusion reasons: {report.overall.exclusion_reasons}")
+
+    if robustness:
+        robustness_report = robustness_evaluation(store)
+        console.print(
+            f"\n[dim]Robustness check: trained once on "
+            f"{robustness_report.training_seasons[0]}-{robustness_report.training_seasons[-1]}, "
+            f"tested on {', '.join(str(f.test_season) for f in robustness_report.folds)} "
+            f"(kept separate from the primary rolling analysis).[/dim]"
+        )
+        console.print(
+            f"Robustness overall: N={robustness_report.overall.sample_count}, "
+            f"Brier={robustness_report.overall.brier_score:.4f}"
+            if robustness_report.overall.brier_score is not None
+            else "Robustness overall: no scored games"
+        )
 
 
 if __name__ == "__main__":

@@ -47,6 +47,28 @@ def _event(event_id: str, season_year: int, week: int, home_idx: int, away_idx: 
     }
 
 
+def _postponed_event(event_id: str, season_year: int, week: int, home_idx: int, away_idx: int) -> dict:
+    """A permanent ESPN placeholder for a game rescheduled to a different
+    event ID or officially cancelled -- never STATUS_FINAL. See
+    historical.py's PERMANENTLY_UNCOMPLETED_STATUSES."""
+    return {
+        "id": event_id,
+        "date": f"{season_year}-09-08T18:00Z",
+        "season": {"year": season_year, "type": 2, "slug": "regular-season"},
+        "week": {"number": week},
+        "competitions": [
+            {
+                "neutralSite": False,
+                "status": {"type": {"name": "STATUS_POSTPONED", "completed": False}},
+                "competitors": [
+                    _competitor("home", home_idx, None),
+                    _competitor("away", away_idx, None),
+                ],
+            }
+        ],
+    }
+
+
 def full_season_weeks(
     season_year: int,
     *,

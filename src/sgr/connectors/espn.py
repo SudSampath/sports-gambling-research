@@ -396,7 +396,17 @@ class EspnConnector(APIConnector):
         if not isinstance(events, list):
             raise EspnSchemaError("ESPN scoreboard payload is missing its events list.")
         retrieved_at = self._as_utc(datetime.fromisoformat(snapshot["retrieved_at"]))
-        return [self._normalize_event(event, snapshot, retrieved_at) for event in events]
+        # ESPN's own historical scoreboard archive occasionally contains a
+        # completely empty `{}` placeholder entry alongside real games (found
+        # live in 2001 week 14 -- one of 15 "events" was `{}`, sandwiched
+        # between real completed games). There is no information to recover
+        # from an empty object, so it is skipped rather than aborting an
+        # entire week's otherwise-valid games; any event with *some* content
+        # that still fails validation continues to raise, preserving the
+        # existing strict schema-drift detection for genuine anomalies.
+        return [
+            self._normalize_event(event, snapshot, retrieved_at) for event in events if event
+        ]
 
     def _normalize_event(
         self, event: Any, snapshot: dict[str, Any], retrieved_at: datetime

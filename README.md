@@ -21,6 +21,18 @@ probability gain was not statistically significant. See the
 the `ingest-roster-continuity`, `compare-roster-continuity`, and
 `project-roster-continuity` CLI commands.
 
+Local historical game coverage extends back to 2000 (the real floor of both
+the ESPN connector and every canonical schema entity's `season_year` field
+-- nflverse's own data goes back to 1999, but this project's ESPN-sourced
+`Game` records cannot). `rolling_evaluation.py` (`expand-evaluation` CLI
+command) runs a rolling-origin, season-held-out evaluation across many
+seasons at once rather than consulting a single season repeatedly -- see
+the [2026-08-27 research note](docs/research/expanded-evaluation-2026-08-27.md)
+for the real 2017-2025 results, a separate 2000-2010-trained robustness
+check, and the real data-quality bugs (schedule-era assumptions, ESPN
+archive gaps, and a shipped-model performance bug) found and fixed while
+building it.
+
 Built on top of that baseline:
 
 - **Win totals** (`win_totals.py`): each team's expected season win total is the exact sum of its per-game win probabilities (linearity of expectation, no simulation), with a variance-based confidence band.
@@ -35,6 +47,7 @@ Two further adjustments were researched, implemented, and walk-forward evaluated
 
 - **Turnover normalization** (`turnover_adjustment.py`): discounting scoring by a real-data-calibrated points-per-turnover-margin rate. Roughly flat to slightly worse than the unadjusted baseline on held-out 2025 data.
 - **Strength-of-schedule adjustment** (`sos_adjustment.py`): scaling points-for/against by opponent strength relative to the league average. Clearly worse than baseline on held-out 2025 data -- current-season-only opponent samples are too small (often 1-4 games) for the adjustment to separate real signal from noise.
+- **Game-context effects** (`context_effects.py`): rest-days differential and dome/outdoor roof, each fit as an additive logit adjustment on the shipped baseline's own forecast and tested on real 2023-2025 held-out games. Both are effectively indistinguishable from the unadjusted baseline (Brier differs in the fourth decimal place) -- a real, expected negative result consistent with published research on rest/bye effects. Travel distance, timezone, and pregame weather were not built (no stadium-coordinate or archived-forecast source available); final observed temp/wind are ingested for provenance only, never a feature. See the [2026-08-27 research note](docs/research/context-effects-2026-08-27.md) and the `ingest-game-context`/`evaluate-context-effects` CLI commands.
 
 A combined "blend" of injuries + turnover + SOS was also evaluated (`candidate_comparison.py`) and does not beat the injury adjustment alone, since SOS's damage outweighs the other two. See the closed SUD-108/109/110/111 tickets for the full real-data comparison tables and reasoning.
 

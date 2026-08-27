@@ -213,6 +213,33 @@ class ClosingLine(CanonicalRecord):
         return self
 
 
+class GameContext(CanonicalRecord):
+    """Schedule-known situational context for one game, from nflverse's
+    games.csv (SUD-127) -- joined to the canonical Game the same
+    ESPN-event-ID way ClosingLine is.
+
+    Rest days, divisional status, roof, and surface are knowable from the
+    schedule itself, arbitrarily far in advance -- safe as a pregame
+    feature. ``observed_temp_fahrenheit``/``observed_wind_mph`` are the
+    final conditions nflverse recorded for the game (not an archived
+    pregame forecast, which this project does not have a source for);
+    they are retained for provenance/benchmark analysis only and must
+    never enter a pregame feature -- the same discipline ClosingLine
+    already documents for closing market lines.
+    """
+
+    entity_type: Literal["game_context"] = "game_context"
+    game_id: str
+    season_year: int = Field(ge=1999)
+    home_rest_days: int = Field(gt=0)
+    away_rest_days: int = Field(gt=0)
+    divisional_game: bool
+    roof: Literal["outdoors", "dome", "closed", "open"] | None = None
+    surface: str | None = None
+    observed_temp_fahrenheit: int | None = None
+    observed_wind_mph: int | None = Field(default=None, ge=0)
+
+
 class KalshiEvent(CanonicalRecord):
     entity_type: Literal["kalshi_event"] = "kalshi_event"
     ticker: str = Field(min_length=1)
@@ -436,6 +463,7 @@ RECORD_TYPES: dict[str, type[CanonicalRecord]] = {
         TeamStrengthSnapshot,
         RosterContinuitySignal,
         ClosingLine,
+        GameContext,
         KalshiEvent,
         KalshiMarket,
         OrderBookSnapshot,
