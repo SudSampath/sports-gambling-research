@@ -21,6 +21,18 @@ probability gain was not statistically significant. See the
 the `ingest-roster-continuity`, `compare-roster-continuity`, and
 `project-roster-continuity` CLI commands.
 
+Local historical game coverage extends back to 2000 (the real floor of both
+the ESPN connector and every canonical schema entity's `season_year` field
+-- nflverse's own data goes back to 1999, but this project's ESPN-sourced
+`Game` records cannot). `rolling_evaluation.py` (`expand-evaluation` CLI
+command) runs a rolling-origin, season-held-out evaluation across many
+seasons at once rather than consulting a single season repeatedly -- see
+the [2026-08-27 research note](docs/research/expanded-evaluation-2026-08-27.md)
+for the real 2017-2025 results, a separate 2000-2010-trained robustness
+check, and the real data-quality bugs (schedule-era assumptions, ESPN
+archive gaps, and a shipped-model performance bug) found and fixed while
+building it.
+
 Built on top of that baseline:
 
 - **Win totals** (`win_totals.py`): each team's expected season win total is the exact sum of its per-game win probabilities (linearity of expectation, no simulation), with a variance-based confidence band.
