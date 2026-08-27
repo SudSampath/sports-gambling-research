@@ -17,8 +17,11 @@ from sgr.connectors.espn import EspnConnector
 from sgr.connectors.nflverse import NflverseConnector
 from sgr.research.candidate_comparison import run_candidate_comparison
 from sgr.research.closing_lines import ingest_closing_lines
+from sgr.research.context_effects_evaluation import run_context_effects_evaluation
 from sgr.research.efficiency_evaluation import select_efficiency_coefficients_on_training_fold
+from sgr.research.game_context import ingest_game_contexts
 from sgr.research.play_level_features import ingest_play_level_features
+from sgr.research.scoring_luck_evaluation import run_scoring_luck_evaluation
 from sgr.research.evaluation import run_walk_forward_evaluation
 from sgr.research.historical import SeasonCoverageError, ingest_regular_season
 from sgr.research.holdout_backtest import DEFAULT_HOLDOUT_FRACTION, DEFAULT_HOLDOUT_SEED, run_holdout_backtest
@@ -738,6 +741,133 @@ def ingest_play_level_features_cmd(
         console.print(f"Team-game efficiency records written: {report.team_games_written}")
 
     asyncio.run(_run())
+
+
+@app.command(name="ingest-game-context")
+def ingest_game_context_cmd(
+    seasons: list[int] = typer.Option(
+        ..., "--season", help="Regular season year to ingest rest/venue/surface context for; repeat for multiple"
+    ),
+    refresh: bool = typer.Option(False, help="Bypass the local nflverse games.csv cache"),
+) -> None:
+    """Ingest rest days, divisional status, roof, and surface from nflverse
+    for the game-context effects ablation (SUD-127). Final observed
+    temp/wind are retained for provenance only -- never a pregame feature,
+    since this project has no archived pregame weather-forecast source."""
+
+    async def _run() -> None:
+        report = await ingest_game_contexts(NflverseConnector(), ResearchStore(), seasons, refresh=refresh)
+
+        table = Table(title="Game-context ingest coverage")
+        table.add_column("Season")
+        table.add_column("Games in source")
+        table.add_column("Rest")
+        table.add_column("Roof")
+        table.add_column("Surface")
+        table.add_column("Observed weather")
+        for year, coverage in sorted(report.by_season.items()):
+            table.add_row(
+                str(year),
+                str(coverage.games_in_source),
+                f"{coverage.rest_coverage}/{coverage.games_in_source}",
+                f"{coverage.roof_coverage}/{coverage.games_in_source}",
+                f"{coverage.surface_coverage}/{coverage.games_in_source}",
+                f"{coverage.observed_weather_coverage}/{coverage.games_in_source}",
+            )
+        console.print(table)
+        console.print(f"Game contexts written: {report.games_written}")
+
+    asyncio.run(_run())
+
+
+@app.command(name="evaluate-context-effects")
+def evaluate_context_effects_cmd(
+    training_seasons: list[int] = typer.Option(
+        ..., "--train-season", help="Training-fold season year; repeat for multiple"
+    ),
+    test_seasons: list[int] = typer.Option(
+        ..., "--test-season", help="Held-out test season year; repeat for multiple"
+    ),
+) -> None:
+    """Fit rest/venue-roof additive logit adjustments on training seasons
+    and compare baseline/rest-only/venue-only/combined on held-out test
+    seasons (SUD-127)."""
+    store = ResearchStore()
+    report = run_context_effects_evaluation(store, training_seasons, test_seasons)
+
+    console.print(
+        f"Fitted on {training_seasons[0]}-{training_seasons[-1]}: "
+        f"rest_coefficient={report.rest_coefficient:.4f}, dome_coefficient={report.dome_coefficient:.4f}"
+    )
+    table = Table(title=f"Context-effects ablation (test seasons {', '.join(str(y) for y in report.season_years)})")
+    table.add_column("Configuration")
+    table.add_column("N")
+    table.add_column("Excluded")
+    table.add_column("Brier")
+    table.add_column("Log loss")
+    for name, metrics in (
+        ("baseline", report.baseline),
+        ("rest-only", report.rest_only),
+        ("venue-only", report.venue_only),
+        ("combined", report.combined),
+    ):
+        table.add_row(
+            name,
+            str(metrics.sample_count),
+            str(metrics.excluded_count),
+            f"{metrics.brier_score:.4f}" if metrics.brier_score is not None else "-",
+            f"{metrics.log_loss:.4f}" if metrics.log_loss is not None else "-",
+        )
+    console.print(table)
+    console.print(
+        f"Context coverage: {report.context_coverage['games_with_context']}/"
+        f"{report.context_coverage['games_scored']} scored games had a GameContext record "
+        f"({report.games_missing_context} missing)"
+    )
+
+
+@app.command(name="evaluate-scoring-luck")
+def evaluate_scoring_luck_cmd(
+    training_seasons: list[int] = typer.Option(
+        ..., "--train-season", help="Training-fold season year; repeat for multiple"
+    ),
+    test_seasons: list[int] = typer.Option(
+        ..., "--test-season", help="Held-out test season year; repeat for multiple"
+    ),
+) -> None:
+    """Fit red-zone/special-teams/turnover-margin additive logit adjustments
+    on training seasons and compare baseline/redzone-only/special-teams-only
+    /turnover-only/combined on held-out test seasons (SUD-129)."""
+    store = ResearchStore()
+    report = run_scoring_luck_evaluation(store, training_seasons, test_seasons)
+
+    console.print(
+        f"Fitted on {training_seasons[0]}-{training_seasons[-1]}: "
+        f"redzone_coefficient={report.redzone_coefficient:.4f}, "
+        f"special_teams_coefficient={report.special_teams_coefficient:.4f}, "
+        f"turnover_coefficient={report.turnover_coefficient:.4f}"
+    )
+    table = Table(title=f"Scoring-luck ablation (test seasons {', '.join(str(y) for y in report.season_years)})")
+    table.add_column("Configuration")
+    table.add_column("N")
+    table.add_column("Excluded")
+    table.add_column("Brier")
+    table.add_column("Log loss")
+    for name, metrics in (
+        ("baseline", report.baseline),
+        ("redzone-only", report.redzone_only),
+        ("special-teams-only", report.special_teams_only),
+        ("turnover-only", report.turnover_only),
+        ("combined", report.combined),
+    ):
+        table.add_row(
+            name,
+            str(metrics.sample_count),
+            str(metrics.excluded_count),
+            f"{metrics.brier_score:.4f}" if metrics.brier_score is not None else "-",
+            f"{metrics.log_loss:.4f}" if metrics.log_loss is not None else "-",
+        )
+    console.print(table)
 
 
 @app.command()
