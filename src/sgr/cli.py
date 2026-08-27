@@ -17,6 +17,7 @@ from sgr.connectors.espn import EspnConnector
 from sgr.connectors.nflverse import NflverseConnector
 from sgr.research.candidate_comparison import run_candidate_comparison
 from sgr.research.closing_lines import ingest_closing_lines
+from sgr.research.efficiency_evaluation import select_efficiency_coefficients_on_training_fold
 from sgr.research.play_level_features import ingest_play_level_features
 from sgr.research.evaluation import run_walk_forward_evaluation
 from sgr.research.historical import SeasonCoverageError, ingest_regular_season
@@ -839,6 +840,54 @@ def expand_evaluation_cmd(
             if robustness_report.overall.brier_score is not None
             else "Robustness overall: no scored games"
         )
+
+
+@app.command(name="evaluate-efficiency-strength")
+def evaluate_efficiency_strength_cmd(
+    training_seasons: list[int] = typer.Option(
+        ..., "--train-season", help="Training-fold season year; repeat for multiple"
+    ),
+    test_season: int = typer.Option(..., help="Held-out test season year"),
+) -> None:
+    """Fit the play-level efficiency-strength model on training seasons and
+    compare it with the shipped Pythagorean baseline on a held-out test
+    season (SUD-124). An independently priced football model -- never reads
+    market/betting-line data."""
+    store = ResearchStore()
+    slope, points_per_epa, report = select_efficiency_coefficients_on_training_fold(
+        store, training_seasons, [test_season]
+    )
+
+    console.print(
+        f"Fitted on {training_seasons[0]}-{training_seasons[-1]}: "
+        f"slope={slope:.3f}, points_per_epa={points_per_epa:.2f}"
+    )
+    table = Table(title=f"Efficiency-strength vs. shipped baseline (test season {test_season})")
+    table.add_column("Model")
+    table.add_column("N")
+    table.add_column("Excluded")
+    table.add_column("Brier")
+    table.add_column("Log loss")
+    table.add_column("Margin MAE")
+    table.add_row(
+        report.model_version,
+        str(report.efficiency_metrics.sample_count),
+        str(report.efficiency_metrics.excluded_count),
+        f"{report.efficiency_metrics.brier_score:.4f}" if report.efficiency_metrics.brier_score is not None else "-",
+        f"{report.efficiency_metrics.log_loss:.4f}" if report.efficiency_metrics.log_loss is not None else "-",
+        f"{report.efficiency_margin_mae:.2f}" if report.efficiency_margin_mae is not None else "-",
+    )
+    table.add_row(
+        report.baseline_model_version,
+        str(report.baseline_metrics.sample_count),
+        str(report.baseline_metrics.excluded_count),
+        f"{report.baseline_metrics.brier_score:.4f}" if report.baseline_metrics.brier_score is not None else "-",
+        f"{report.baseline_metrics.log_loss:.4f}" if report.baseline_metrics.log_loss is not None else "-",
+        "-",
+    )
+    console.print(table)
+    if report.efficiency_metrics.exclusion_reasons:
+        console.print(f"Efficiency exclusion reasons: {report.efficiency_metrics.exclusion_reasons}")
 
 
 if __name__ == "__main__":
