@@ -116,22 +116,31 @@ def build_efficiency_index(
     )
 
 
-def compute_team_efficiency(
+def compute_team_epa_by_field(
     index: EfficiencyIndex,
     games_by_id: dict[str, Game],
     team_id: str,
     season_year: int,
     feature_cutoff_at: datetime,
     *,
+    epa_field: str = "offense_epa_per_play",
+    plays_field: str = "offense_plays",
     shrinkage_pseudoplays: int = SHRINKAGE_PSEUDOPLAYS,
-) -> TeamEfficiencyStrength:
-    """A team's shrunk offense/defense EPA-per-play as of feature_cutoff_at.
+) -> tuple[float, float, float, int, int]:
+    """Shrunk offense/defense EPA-per-play for an arbitrary EPA/plays field
+    pair on TeamGameEfficiency (e.g. pass_epa_per_play/pass_plays,
+    rush_epa_per_play/rush_plays) -- the generic core `compute_team_efficiency`
+    (offense_epa_per_play/offense_plays) and SUD-126's matchup interactions
+    (pass/rush-specific splits) both build on, so the point-in-time
+    filtering and shrinkage logic is written once.
 
     Only completed regular-season games with kickoff strictly before
     feature_cutoff_at contribute -- the same point-in-time boundary
     compute_team_strength enforces for the Pythagorean baseline. Current
     season blends toward the immediately prior season the same way, via
     the shared shrink_toward_prior primitive.
+
+    Returns (blended_offense, blended_defense_allowed, shrinkage_weight, current_plays, prior_plays).
     """
     eligible: list[TeamGameEfficiency] = []
     for record in index.by_team.get(team_id, ()):
@@ -153,14 +162,14 @@ def compute_team_efficiency(
             f"{feature_cutoff_at.isoformat()}."
         )
 
-    current_offense, current_plays = _weighted_epa(current, "offense_epa_per_play", "offense_plays")
-    prior_offense, _ = _weighted_epa(prior, "offense_epa_per_play", "offense_plays")
-    prior_plays = sum(r.offense_plays for r in prior)
+    current_offense, current_plays = _weighted_epa(current, epa_field, plays_field)
+    prior_offense, _ = _weighted_epa(prior, epa_field, plays_field)
+    prior_plays = sum(getattr(r, plays_field) for r in prior)
 
     # Defense allowed: this team's defensive EPA/play allowed is not a field
     # on its own record (see TeamGameEfficiency's docstring) -- it is the
-    # *opponent's* offense_epa_per_play in the same game, looked up in O(1)
-    # rather than re-scanning every record for a matching game/team pair.
+    # *opponent's* own EPA field in the same game, looked up in O(1) rather
+    # than re-scanning every record for a matching game/team pair.
     current_defense_records = [
         index.by_game_and_team[(r.game_id, r.opponent_team_id)]
         for r in current
@@ -171,8 +180,8 @@ def compute_team_efficiency(
         for r in prior
         if (r.game_id, r.opponent_team_id) in index.by_game_and_team
     ]
-    current_defense, _ = _weighted_epa(current_defense_records, "offense_epa_per_play", "offense_plays")
-    prior_defense, _ = _weighted_epa(prior_defense_records, "offense_epa_per_play", "offense_plays")
+    current_defense, _ = _weighted_epa(current_defense_records, epa_field, plays_field)
+    prior_defense, _ = _weighted_epa(prior_defense_records, epa_field, plays_field)
 
     blended_offense, weight = shrink_toward_prior(
         current_offense, current_plays, prior_offense, pseudogames=shrinkage_pseudoplays
@@ -182,10 +191,26 @@ def compute_team_efficiency(
     )
     if blended_offense is None or blended_defense is None:
         raise InsufficientPlayDataError(
-            f"No usable offense/defense EPA is available for team {team_id} before "
+            f"No usable {epa_field} is available for team {team_id} before "
             f"{feature_cutoff_at.isoformat()}."
         )
+    return blended_offense, blended_defense, weight, current_plays, prior_plays
 
+
+def compute_team_efficiency(
+    index: EfficiencyIndex,
+    games_by_id: dict[str, Game],
+    team_id: str,
+    season_year: int,
+    feature_cutoff_at: datetime,
+    *,
+    shrinkage_pseudoplays: int = SHRINKAGE_PSEUDOPLAYS,
+) -> TeamEfficiencyStrength:
+    """A team's shrunk offense/defense EPA-per-play as of feature_cutoff_at."""
+    blended_offense, blended_defense, weight, current_plays, prior_plays = compute_team_epa_by_field(
+        index, games_by_id, team_id, season_year, feature_cutoff_at,
+        shrinkage_pseudoplays=shrinkage_pseudoplays,
+    )
     return TeamEfficiencyStrength(
         team_id=team_id,
         season_year=season_year,
