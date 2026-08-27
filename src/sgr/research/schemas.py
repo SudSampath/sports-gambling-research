@@ -169,6 +169,50 @@ class RosterContinuitySignal(CanonicalRecord):
         return self
 
 
+class ClosingLine(CanonicalRecord):
+    """A game's closing spread, total, and moneylines from nflverse.
+
+    ``game_id`` is computed the same way ``Game.id`` is (stable_record_id
+    from the shared ESPN event ID), so a closing line can be written before
+    -- or after -- its canonical Game record exists locally; the two are
+    joined by construction rather than by a runtime lookup.
+
+    ``home_spread`` is the home team's expected scoring margin in the same
+    sign convention as ``home_score - away_score``: positive means the home
+    team was favored by that many points, negative means the home team was
+    the underdog. This is nflverse's own ``spread_line`` convention,
+    verified against real 2024 games in SUD-119 (home favorites carry a
+    negative moneyline and a positive spread_line; the mean of
+    actual_margin - spread_line across 6,967 graded games is ~0.07, i.e.
+    spread_line is an unbiased estimate of home-team margin, not the
+    opposite-signed "favorite's spread" a sportsbook board displays).
+    Missing moneylines stay ``None`` rather than being inferred from the
+    spread. Kickoff time and home/away team identity are deliberately not
+    duplicated here -- they are already authoritative on the joined ``Game``
+    record, the same convention ``Forecast``/``Outcome``/``MatchDecision``
+    use. ``event_time`` is the source snapshot's retrieval time (nflverse
+    does not publish an exact closing timestamp, only the closing values
+    themselves), the same honest stand-in ``Team`` and
+    ``PlayerGameStatline`` already use for a record with no timestamp of
+    its own.
+    """
+
+    entity_type: Literal["closing_line"] = "closing_line"
+    game_id: str
+    season_year: int = Field(ge=1999)
+    home_spread: Decimal | None = None
+    total_points: Decimal | None = Field(default=None, gt=0)
+    home_moneyline: int | None = None
+    away_moneyline: int | None = None
+
+    @model_validator(mode="after")
+    def moneylines_are_independently_optional(self) -> ClosingLine:
+        for value in (self.home_moneyline, self.away_moneyline):
+            if value is not None and value == 0:
+                raise ValueError("American moneylines cannot be zero.")
+        return self
+
+
 class KalshiEvent(CanonicalRecord):
     entity_type: Literal["kalshi_event"] = "kalshi_event"
     ticker: str = Field(min_length=1)
@@ -391,6 +435,7 @@ RECORD_TYPES: dict[str, type[CanonicalRecord]] = {
         Game,
         TeamStrengthSnapshot,
         RosterContinuitySignal,
+        ClosingLine,
         KalshiEvent,
         KalshiMarket,
         OrderBookSnapshot,

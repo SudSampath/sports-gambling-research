@@ -16,6 +16,7 @@ from sgr.connectors import KalshiConnector
 from sgr.connectors.espn import EspnConnector
 from sgr.connectors.nflverse import NflverseConnector
 from sgr.research.candidate_comparison import run_candidate_comparison
+from sgr.research.closing_lines import ingest_closing_lines
 from sgr.research.evaluation import run_walk_forward_evaluation
 from sgr.research.historical import SeasonCoverageError, ingest_regular_season
 from sgr.research.holdout_backtest import DEFAULT_HOLDOUT_FRACTION, DEFAULT_HOLDOUT_SEED, run_holdout_backtest
@@ -649,6 +650,50 @@ def combined_outcome(
         f"Fair (breakeven) decimal odds: {result.fair_decimal_odds:.2f}"
         if result.fair_decimal_odds is not None else "Fair decimal odds: n/a (probability is zero)"
     )
+
+
+@app.command(name="ingest-closing-lines")
+def ingest_closing_lines_cmd(
+    seasons: list[int] = typer.Option(
+        ..., "--season", help="Regular season year to ingest closing lines for; repeat for multiple"
+    ),
+    refresh: bool = typer.Option(False, help="Bypass the local nflverse games.csv cache"),
+) -> None:
+    """Ingest closing spreads/totals/moneylines from nflverse for the closing
+    market benchmark (SUD-119). Not a training feature for the independent
+    fair-price model -- benchmark-only, see docs/PRD.md."""
+
+    async def _run() -> None:
+        report = await ingest_closing_lines(
+            NflverseConnector(), ResearchStore(), seasons, refresh=refresh
+        )
+
+        table = Table(title="Closing-line ingest coverage")
+        table.add_column("Season")
+        table.add_column("Games in source")
+        table.add_column("Spread")
+        table.add_column("Total")
+        table.add_column("Moneyline")
+        for year, coverage in sorted(report.by_season.items()):
+            table.add_row(
+                str(year),
+                str(coverage.games_in_source),
+                f"{coverage.spread_coverage}/{coverage.games_in_source}",
+                f"{coverage.total_coverage}/{coverage.games_in_source}",
+                f"{coverage.moneyline_coverage}/{coverage.games_in_source}",
+            )
+        console.print(table)
+        console.print(
+            f"Closing lines written: {report.games_written} "
+            f"(matched to a locally ingested Game: {report.matched_to_local_game})"
+        )
+        if report.unmatched_espn_ids:
+            console.print(
+                f"[yellow]{len(report.unmatched_espn_ids)} source rows had no ESPN ID and were "
+                f"excluded: {list(report.unmatched_espn_ids)[:10]}[/yellow]"
+            )
+
+    asyncio.run(_run())
 
 
 @app.command()

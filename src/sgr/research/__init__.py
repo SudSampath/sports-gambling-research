@@ -1,6 +1,7 @@
 from sgr.research.schemas import (
     CURRENT_SCHEMA_VERSION,
     CanonicalLineage,
+    ClosingLine,
     Forecast,
     Game,
     IncompatibleSchemaVersionError,
@@ -22,6 +23,7 @@ from sgr.research.storage import ResearchStore
 __all__ = [
     "CURRENT_SCHEMA_VERSION",
     "CanonicalLineage",
+    "ClosingLine",
     "Forecast",
     "Game",
     "IncompatibleSchemaVersionError",
