@@ -20,6 +20,7 @@ from sgr.research.closing_lines import ingest_closing_lines
 from sgr.research.context_effects_evaluation import run_context_effects_evaluation
 from sgr.research.efficiency_evaluation import select_efficiency_coefficients_on_training_fold
 from sgr.research.game_context import ingest_game_contexts
+from sgr.research.matchup_interactions_evaluation import run_matchup_interactions_evaluation
 from sgr.research.play_level_features import ingest_play_level_features
 from sgr.research.scoring_luck_evaluation import run_scoring_luck_evaluation
 from sgr.research.evaluation import run_walk_forward_evaluation
@@ -1018,6 +1019,51 @@ def evaluate_efficiency_strength_cmd(
     console.print(table)
     if report.efficiency_metrics.exclusion_reasons:
         console.print(f"Efficiency exclusion reasons: {report.efficiency_metrics.exclusion_reasons}")
+
+
+@app.command(name="evaluate-matchup-interactions")
+def evaluate_matchup_interactions_cmd(
+    training_seasons: list[int] = typer.Option(
+        ..., "--train-season", help="Training-fold season year; repeat for multiple"
+    ),
+    test_seasons: list[int] = typer.Option(
+        ..., "--test-season", help="Held-out test season year; repeat for multiple"
+    ),
+) -> None:
+    """Fit pass/rush matchup-differential additive logit coefficients on
+    training seasons and compare baseline/pass-only/rush-only/combined on
+    held-out test seasons (SUD-126)."""
+    store = ResearchStore()
+    report = run_matchup_interactions_evaluation(store, training_seasons, test_seasons)
+
+    console.print(
+        f"Fitted on {training_seasons[0]}-{training_seasons[-1]}: "
+        f"pass_coefficient={report.pass_coefficient:.4f}, rush_coefficient={report.rush_coefficient:.4f}"
+    )
+    table = Table(title=f"Matchup-interactions ablation (test seasons {', '.join(str(y) for y in report.season_years)})")
+    table.add_column("Configuration")
+    table.add_column("N")
+    table.add_column("Excluded")
+    table.add_column("Brier")
+    table.add_column("Log loss")
+    for name, metrics in (
+        ("baseline", report.baseline),
+        ("pass-only", report.pass_only),
+        ("rush-only", report.rush_only),
+        ("combined", report.combined),
+    ):
+        table.add_row(
+            name,
+            str(metrics.sample_count),
+            str(metrics.excluded_count),
+            f"{metrics.brier_score:.4f}" if metrics.brier_score is not None else "-",
+            f"{metrics.log_loss:.4f}" if metrics.log_loss is not None else "-",
+        )
+    console.print(table)
+    console.print(
+        f"Aggregate-rating fallback used: {report.pass_aggregate_fallbacks} games (pass), "
+        f"{report.rush_aggregate_fallbacks} games (rush)"
+    )
 
 
 if __name__ == "__main__":

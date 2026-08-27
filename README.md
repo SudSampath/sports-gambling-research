@@ -45,6 +45,7 @@ Built on top of that baseline:
 ### Researched but not adopted
 
 - **Play-level efficiency-strength model** (`efficiency_strength.py`, `efficiency_evaluation.py`): a shrinkage-based, opponent-adjusted offense/defense rating built from play-level EPA, with fitted win-probability and expected-margin transforms. Evaluated on three real rolling seasons (2023-2025, trained on 2015 forward each time) and **rejected as the default**: the shipped Pythagorean baseline wins on Brier score, log loss, and margin MAE in every test season. Kept as an opt-in, fully tested research variant rather than discarded -- see the [2026-08-27 research note](docs/research/efficiency-strength-2026-08-27.md) for the full comparison table and the `evaluate-efficiency-strength` CLI command.
+- **Matchup interactions** (`matchup_interactions.py`, `matchup_interactions_evaluation.py`): pass-vs-pass and rush-vs-rush net-EPA/play differentials, fit as an additive logit adjustment on top of the shipped baseline (falling back to a team's aggregate efficiency rating when pass/rush-specific coverage is insufficient). Evaluated on the same three real rolling seasons and **rejected as the default**: no configuration (pass-only, rush-only, combined) beats the baseline in more than one of the three test seasons. Kept as an opt-in research variant -- see the [2026-08-27 research note](docs/research/matchup-interactions-2026-08-27.md) for the full comparison table and the `evaluate-matchup-interactions` CLI command.
 
 ### What was tried and did not help
 
