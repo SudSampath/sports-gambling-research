@@ -29,6 +29,15 @@ Two further adjustments were researched, implemented, and walk-forward evaluated
 
 A combined "blend" of injuries + turnover + SOS was also evaluated (`candidate_comparison.py`) and does not beat the injury adjustment alone, since SOS's damage outweighs the other two. See the closed SUD-108/109/110/111 tickets for the full real-data comparison tables and reasoning.
 
+### Data-source decisions
+
+No free, licensed source of *historical* preseason NFL team season win-total
+lines was found -- see the [2026-08-27 source spike](docs/research/win-total-history-source-2026-08-27.md).
+Kalshi's `KXNFLWINS-<TEAM>` markets are a viable *forward-only* candidate
+starting the 2026 season through the existing read-only Kalshi connector; no
+historical win-total column exists in any comparison report until that is
+implemented and confirmed liquid.
+
 ## Non-goals for the first milestone
 
 - Real-money order submission, modification, cancellation, or settlement.
