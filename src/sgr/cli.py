@@ -23,6 +23,12 @@ from sgr.research.margin import DEFAULT_HOME_FIELD_MARGIN_POINTS, calibrate_home
 from sgr.research.margin_evaluation import run_margin_walk_forward_evaluation
 from sgr.research.player_backfill import backfill_boxscores
 from sgr.research.player_impact_evaluation import evaluate_player_impact_on_missing_starters
+from sgr.research.rolling_evaluation import (
+    DEFAULT_ROLLING_WINDOW_SEASONS,
+    PRIMARY_TEST_SEASONS,
+    robustness_evaluation,
+    rolling_origin_evaluation,
+)
 from sgr.research.schemas import Game, Team
 from sgr.research.season_simulation import (
     DEFAULT_N_SIMULATIONS,
@@ -553,6 +559,82 @@ def compare_candidates(
             f"{m.accuracy:.1%}" if m.accuracy is not None else "-",
         )
     console.print(table)
+
+
+@app.command(name="expand-evaluation")
+def expand_evaluation_cmd(
+    window: str = typer.Option("expanding", help="Training window: 'expanding' or 'rolling'"),
+    rolling_window_seasons: int = typer.Option(
+        DEFAULT_ROLLING_WINDOW_SEASONS, help="Seasons of history used when --window=rolling"
+    ),
+    test_seasons: list[int] = typer.Option(
+        list(PRIMARY_TEST_SEASONS),
+        "--test-season",
+        help="Rolling-origin test season; repeat for multiple (default: 2017-2025)",
+    ),
+    robustness: bool = typer.Option(
+        False, "--robustness", help="Also run the 2000-2010-trained, 2011-2016-tested stable-parameter check"
+    ),
+) -> None:
+    """Rolling-origin, season-held-out evaluation across many seasons (SUD-122).
+
+    2025 is labeled validation, not a pristine holdout; 2026 can never enter
+    a fold as a test season or training season."""
+    store = ResearchStore()
+    report = rolling_origin_evaluation(
+        store, test_seasons=tuple(test_seasons), window=window, rolling_window_seasons=rolling_window_seasons
+    )
+
+    console.print(
+        f"[dim]Validation season: {report.validation_season} (already consulted by earlier "
+        f"candidate decisions). Prospective lockbox: {report.lockbox_season} (reserved, never "
+        f"scored here).[/dim]"
+    )
+    table = Table(title=f"Rolling-origin evaluation ({report.window} window)")
+    table.add_column("Test season")
+    table.add_column("Train seasons")
+    table.add_column("Exponent")
+    table.add_column("N")
+    table.add_column("Excluded")
+    table.add_column("Brier")
+    table.add_column("Margin MAE")
+    for fold in report.folds:
+        table.add_row(
+            str(fold.test_season),
+            f"{fold.training_seasons[0]}-{fold.training_seasons[-1]} ({len(fold.training_seasons)})",
+            f"{fold.chosen_exponent:.3f}",
+            str(fold.game_metrics.sample_count),
+            str(fold.game_metrics.excluded_count),
+            f"{fold.game_metrics.brier_score:.4f}" if fold.game_metrics.brier_score is not None else "-",
+            f"{fold.margin_metrics.mean_absolute_error:.2f}"
+            if fold.margin_metrics.mean_absolute_error is not None
+            else "-",
+        )
+    console.print(table)
+    console.print(
+        f"Overall: N={report.overall.sample_count}, excluded={report.overall.excluded_count}, "
+        f"Brier={report.overall.brier_score:.4f}" if report.overall.brier_score is not None else "Overall: no scored games"
+    )
+    if report.season_clustered_brier_ci is not None:
+        lo, hi = report.season_clustered_brier_ci
+        console.print(f"Season-clustered Brier 95% CI: [{lo:.4f}, {hi:.4f}]")
+    if report.overall.exclusion_reasons:
+        console.print(f"Exclusion reasons: {report.overall.exclusion_reasons}")
+
+    if robustness:
+        robustness_report = robustness_evaluation(store)
+        console.print(
+            f"\n[dim]Robustness check: trained once on "
+            f"{robustness_report.training_seasons[0]}-{robustness_report.training_seasons[-1]}, "
+            f"tested on {', '.join(str(f.test_season) for f in robustness_report.folds)} "
+            f"(kept separate from the primary rolling analysis).[/dim]"
+        )
+        console.print(
+            f"Robustness overall: N={robustness_report.overall.sample_count}, "
+            f"Brier={robustness_report.overall.brier_score:.4f}"
+            if robustness_report.overall.brier_score is not None
+            else "Robustness overall: no scored games"
+        )
 
 
 if __name__ == "__main__":
