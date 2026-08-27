@@ -17,7 +17,10 @@ from sgr.connectors.espn import EspnConnector
 from sgr.connectors.nflverse import NflverseConnector
 from sgr.research.candidate_comparison import run_candidate_comparison
 from sgr.research.closing_lines import ingest_closing_lines
+from sgr.research.context_effects_evaluation import run_context_effects_evaluation
 from sgr.research.efficiency_evaluation import select_efficiency_coefficients_on_training_fold
+from sgr.research.game_context import ingest_game_contexts
+from sgr.research.matchup_interactions_evaluation import run_matchup_interactions_evaluation
 from sgr.research.play_level_features import ingest_play_level_features
 from sgr.research.evaluation import run_walk_forward_evaluation
 from sgr.research.historical import SeasonCoverageError, ingest_regular_season
@@ -740,6 +743,89 @@ def ingest_play_level_features_cmd(
     asyncio.run(_run())
 
 
+@app.command(name="ingest-game-context")
+def ingest_game_context_cmd(
+    seasons: list[int] = typer.Option(
+        ..., "--season", help="Regular season year to ingest rest/venue/surface context for; repeat for multiple"
+    ),
+    refresh: bool = typer.Option(False, help="Bypass the local nflverse games.csv cache"),
+) -> None:
+    """Ingest rest days, divisional status, roof, and surface from nflverse
+    for the game-context effects ablation (SUD-127). Final observed
+    temp/wind are retained for provenance only -- never a pregame feature,
+    since this project has no archived pregame weather-forecast source."""
+
+    async def _run() -> None:
+        report = await ingest_game_contexts(NflverseConnector(), ResearchStore(), seasons, refresh=refresh)
+
+        table = Table(title="Game-context ingest coverage")
+        table.add_column("Season")
+        table.add_column("Games in source")
+        table.add_column("Rest")
+        table.add_column("Roof")
+        table.add_column("Surface")
+        table.add_column("Observed weather")
+        for year, coverage in sorted(report.by_season.items()):
+            table.add_row(
+                str(year),
+                str(coverage.games_in_source),
+                f"{coverage.rest_coverage}/{coverage.games_in_source}",
+                f"{coverage.roof_coverage}/{coverage.games_in_source}",
+                f"{coverage.surface_coverage}/{coverage.games_in_source}",
+                f"{coverage.observed_weather_coverage}/{coverage.games_in_source}",
+            )
+        console.print(table)
+        console.print(f"Game contexts written: {report.games_written}")
+
+    asyncio.run(_run())
+
+
+@app.command(name="evaluate-context-effects")
+def evaluate_context_effects_cmd(
+    training_seasons: list[int] = typer.Option(
+        ..., "--train-season", help="Training-fold season year; repeat for multiple"
+    ),
+    test_seasons: list[int] = typer.Option(
+        ..., "--test-season", help="Held-out test season year; repeat for multiple"
+    ),
+) -> None:
+    """Fit rest/venue-roof additive logit adjustments on training seasons
+    and compare baseline/rest-only/venue-only/combined on held-out test
+    seasons (SUD-127)."""
+    store = ResearchStore()
+    report = run_context_effects_evaluation(store, training_seasons, test_seasons)
+
+    console.print(
+        f"Fitted on {training_seasons[0]}-{training_seasons[-1]}: "
+        f"rest_coefficient={report.rest_coefficient:.4f}, dome_coefficient={report.dome_coefficient:.4f}"
+    )
+    table = Table(title=f"Context-effects ablation (test seasons {', '.join(str(y) for y in report.season_years)})")
+    table.add_column("Configuration")
+    table.add_column("N")
+    table.add_column("Excluded")
+    table.add_column("Brier")
+    table.add_column("Log loss")
+    for name, metrics in (
+        ("baseline", report.baseline),
+        ("rest-only", report.rest_only),
+        ("venue-only", report.venue_only),
+        ("combined", report.combined),
+    ):
+        table.add_row(
+            name,
+            str(metrics.sample_count),
+            str(metrics.excluded_count),
+            f"{metrics.brier_score:.4f}" if metrics.brier_score is not None else "-",
+            f"{metrics.log_loss:.4f}" if metrics.log_loss is not None else "-",
+        )
+    console.print(table)
+    console.print(
+        f"Context coverage: {report.context_coverage['games_with_context']}/"
+        f"{report.context_coverage['games_scored']} scored games had a GameContext record "
+        f"({report.games_missing_context} missing)"
+    )
+
+
 @app.command()
 def compare_candidates(
     seasons: list[int] = typer.Option(..., "--season", help="Completed season year to evaluate; repeat for multiple"),
@@ -888,6 +974,51 @@ def evaluate_efficiency_strength_cmd(
     console.print(table)
     if report.efficiency_metrics.exclusion_reasons:
         console.print(f"Efficiency exclusion reasons: {report.efficiency_metrics.exclusion_reasons}")
+
+
+@app.command(name="evaluate-matchup-interactions")
+def evaluate_matchup_interactions_cmd(
+    training_seasons: list[int] = typer.Option(
+        ..., "--train-season", help="Training-fold season year; repeat for multiple"
+    ),
+    test_seasons: list[int] = typer.Option(
+        ..., "--test-season", help="Held-out test season year; repeat for multiple"
+    ),
+) -> None:
+    """Fit pass/rush matchup-differential additive logit coefficients on
+    training seasons and compare baseline/pass-only/rush-only/combined on
+    held-out test seasons (SUD-126)."""
+    store = ResearchStore()
+    report = run_matchup_interactions_evaluation(store, training_seasons, test_seasons)
+
+    console.print(
+        f"Fitted on {training_seasons[0]}-{training_seasons[-1]}: "
+        f"pass_coefficient={report.pass_coefficient:.4f}, rush_coefficient={report.rush_coefficient:.4f}"
+    )
+    table = Table(title=f"Matchup-interactions ablation (test seasons {', '.join(str(y) for y in report.season_years)})")
+    table.add_column("Configuration")
+    table.add_column("N")
+    table.add_column("Excluded")
+    table.add_column("Brier")
+    table.add_column("Log loss")
+    for name, metrics in (
+        ("baseline", report.baseline),
+        ("pass-only", report.pass_only),
+        ("rush-only", report.rush_only),
+        ("combined", report.combined),
+    ):
+        table.add_row(
+            name,
+            str(metrics.sample_count),
+            str(metrics.excluded_count),
+            f"{metrics.brier_score:.4f}" if metrics.brier_score is not None else "-",
+            f"{metrics.log_loss:.4f}" if metrics.log_loss is not None else "-",
+        )
+    console.print(table)
+    console.print(
+        f"Aggregate-rating fallback used: {report.pass_aggregate_fallbacks} games (pass), "
+        f"{report.rush_aggregate_fallbacks} games (rush)"
+    )
 
 
 if __name__ == "__main__":
