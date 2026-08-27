@@ -17,6 +17,7 @@ from sgr.connectors.espn import EspnConnector
 from sgr.connectors.nflverse import NflverseConnector
 from sgr.research.candidate_comparison import run_candidate_comparison
 from sgr.research.closing_lines import ingest_closing_lines
+from sgr.research.play_level_features import ingest_play_level_features
 from sgr.research.evaluation import run_walk_forward_evaluation
 from sgr.research.historical import SeasonCoverageError, ingest_regular_season
 from sgr.research.holdout_backtest import DEFAULT_HOLDOUT_FRACTION, DEFAULT_HOLDOUT_SEED, run_holdout_backtest
@@ -692,6 +693,42 @@ def ingest_closing_lines_cmd(
                 f"[yellow]{len(report.unmatched_espn_ids)} source rows had no ESPN ID and were "
                 f"excluded: {list(report.unmatched_espn_ids)[:10]}[/yellow]"
             )
+
+    asyncio.run(_run())
+
+
+@app.command(name="ingest-play-level-features")
+def ingest_play_level_features_cmd(
+    seasons: list[int] = typer.Option(
+        ..., "--season", help="Regular season year to ingest play-by-play for; repeat for multiple"
+    ),
+    refresh: bool = typer.Option(False, help="Bypass the local nflverse pbp/games.csv cache"),
+) -> None:
+    """Aggregate nflverse play-by-play into team-game efficiency records
+    (SUD-123). Data layer only -- fits no coefficients, selects no model,
+    and changes no forecast."""
+
+    async def _run() -> None:
+        report = await ingest_play_level_features(NflverseConnector(), ResearchStore(), seasons, refresh=refresh)
+
+        table = Table(title="Play-level feature ingest coverage")
+        table.add_column("Season")
+        table.add_column("Plays in source")
+        table.add_column("Used")
+        table.add_column("Unmatched game")
+        table.add_column("Unresolved team")
+        table.add_column("CPOE coverage")
+        for year, coverage in sorted(report.by_season.items()):
+            table.add_row(
+                str(year),
+                str(coverage.plays_in_source),
+                str(coverage.plays_used),
+                str(coverage.unmatched_game_plays),
+                str(coverage.unresolved_team_plays),
+                str(coverage.cpoe_coverage),
+            )
+        console.print(table)
+        console.print(f"Team-game efficiency records written: {report.team_games_written}")
 
     asyncio.run(_run())
 

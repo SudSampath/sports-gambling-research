@@ -213,6 +213,86 @@ class ClosingLine(CanonicalRecord):
         return self
 
 
+class TeamGameEfficiency(CanonicalRecord):
+    """One team's play-level offensive summary for one game, from nflverse
+    play-by-play (SUD-123).
+
+    There are deliberately no separate "defense" fields: a team's defensive
+    performance in a game is exactly its opponent's offensive record in the
+    same game, so a caller wanting "EPA allowed" joins on
+    ``opponent_team_id`` rather than reading a duplicated, independently
+    derived number that could disagree with the opponent's own record.
+    ``sacks_taken`` is this team's own count; the opponent's identical
+    ``sacks_taken`` in the same game is the sacks this team's defense
+    forced, for the same reason.
+
+    ``game_id`` is computed the same way ``ClosingLine.game_id`` is
+    (``stable_record_id("game", "espn", <espn event id>)``, joined via
+    nflverse's own whole-history ``games.csv``), so this can be written
+    before -- or after -- the canonical ``Game`` record exists locally.
+
+    Every ``*_epa_per_play``/``*_success_rate`` field is ``None`` when its
+    denominator (the matching ``*_plays`` count) is zero, never coerced to
+    0.0 -- a team that never dropped back to pass in a game has no pass
+    EPA, not a pass EPA of zero.
+    """
+
+    entity_type: Literal["team_game_efficiency"] = "team_game_efficiency"
+    game_id: str
+    team_id: str
+    opponent_team_id: str
+    season_year: int = Field(ge=1999)
+    week: int = Field(ge=1, le=25)
+    garbage_time_excluded: bool
+
+    offense_plays: int = Field(ge=0)
+    offense_epa_per_play: Decimal | None = None
+    offense_success_rate: Decimal | None = Field(default=None, ge=0, le=1)
+
+    pass_plays: int = Field(ge=0)
+    pass_epa_per_play: Decimal | None = None
+    pass_success_rate: Decimal | None = Field(default=None, ge=0, le=1)
+    completions: int = Field(ge=0)
+    cpoe: Decimal | None = None
+
+    rush_plays: int = Field(ge=0)
+    rush_epa_per_play: Decimal | None = None
+    rush_success_rate: Decimal | None = Field(default=None, ge=0, le=1)
+
+    early_down_plays: int = Field(ge=0)
+    early_down_epa_per_play: Decimal | None = None
+    early_down_success_rate: Decimal | None = Field(default=None, ge=0, le=1)
+
+    explosive_pass_plays: int = Field(ge=0)
+    explosive_rush_plays: int = Field(ge=0)
+
+    redzone_plays: int = Field(ge=0)
+    redzone_touchdowns: int = Field(ge=0)
+
+    sacks_taken: int = Field(ge=0)
+
+    special_teams_plays: int = Field(ge=0)
+    special_teams_epa_per_play: Decimal | None = None
+
+    @model_validator(mode="after")
+    def denominators_are_coherent(self) -> TeamGameEfficiency:
+        if self.completions > self.pass_plays:
+            raise ValueError("Completions cannot exceed pass plays.")
+        if self.redzone_touchdowns > self.redzone_plays:
+            raise ValueError("Red-zone touchdowns cannot exceed red-zone plays.")
+        if self.sacks_taken > self.pass_plays:
+            raise ValueError("Sacks taken cannot exceed pass plays.")
+        for plays, rate in (
+            (self.offense_plays, self.offense_success_rate),
+            (self.pass_plays, self.pass_success_rate),
+            (self.rush_plays, self.rush_success_rate),
+            (self.early_down_plays, self.early_down_success_rate),
+        ):
+            if plays == 0 and rate is not None:
+                raise ValueError("A zero-play denominator cannot carry a rate.")
+        return self
+
+
 class KalshiEvent(CanonicalRecord):
     entity_type: Literal["kalshi_event"] = "kalshi_event"
     ticker: str = Field(min_length=1)
@@ -436,6 +516,7 @@ RECORD_TYPES: dict[str, type[CanonicalRecord]] = {
         TeamStrengthSnapshot,
         RosterContinuitySignal,
         ClosingLine,
+        TeamGameEfficiency,
         KalshiEvent,
         KalshiMarket,
         OrderBookSnapshot,

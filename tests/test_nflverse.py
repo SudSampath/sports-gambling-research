@@ -89,3 +89,40 @@ def test_games_missing_required_columns_is_rejected(tmp_path):
 
     with pytest.raises(NflverseSchemaError, match="missing required columns"):
         asyncio.run(connector.games())
+
+
+PBP_CSV = (
+    b"game_id,season,season_type,week,posteam,defteam,qtr,down,ydstogo,yardline_100,"
+    b"yards_gained,score_differential,epa,success,pass,rush,sack,complete_pass,touchdown,"
+    b"cpoe,special_teams_play\n"
+    b"2024_01_ARI_BUF,2024,REG,1,BUF,ARI,1,1,10,75,7,0,1.2,1,1,0,0,1,0,5.1,0\n"
+)
+
+
+def _write_cached_pbp(root: Path, season_year: int = 2024, raw: bytes = PBP_CSV) -> Path:
+    checksum = hashlib.sha256(raw).hexdigest()
+    directory = root / "pbp" / str(season_year)
+    directory.mkdir(parents=True)
+    path = directory / f"20260826T120000000000Z-{checksum}.csv"
+    path.write_bytes(raw)
+    return path
+
+
+def test_play_by_play_is_cached_per_season(tmp_path):
+    path = _write_cached_pbp(tmp_path)
+    connector = NflverseConnector(cache_dir=tmp_path)
+
+    snapshot = asyncio.run(connector.play_by_play(2024))
+
+    assert snapshot.rows[0]["posteam"] == "BUF"
+    assert snapshot.source.path == path.as_posix()
+    assert snapshot.source.sha256 == hashlib.sha256(PBP_CSV).hexdigest()
+    assert snapshot.source.source_url.endswith("/pbp/play_by_play_2024.csv")
+
+
+def test_play_by_play_missing_required_columns_is_rejected(tmp_path):
+    _write_cached_pbp(tmp_path, raw=b"game_id,season\n2024_01_ARI_BUF,2024\n")
+    connector = NflverseConnector(cache_dir=tmp_path)
+
+    with pytest.raises(NflverseSchemaError, match="missing required columns"):
+        asyncio.run(connector.play_by_play(2024))
