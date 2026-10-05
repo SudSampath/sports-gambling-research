@@ -20,7 +20,9 @@ dependencies = [
   "rich>=13.7.1",
   "python-dotenv>=1.0.1",
   "duckdb>=1.5.5,<2",
-  "websockets==15.0.1"
+  "websockets==15.0.1",
+  "restate-sdk==1.0.5",
+  "hypercorn==0.17.3"
 ]
 
 [project.optional-dependencies]

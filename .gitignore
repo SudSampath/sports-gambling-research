@@ -21,6 +21,8 @@ __pycache__/
 htmlcov/
 /data/
 /.research/
+/.tools/
+/.runs/
 
 # Build and editor artifacts
 build/

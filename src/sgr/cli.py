@@ -37,6 +37,8 @@ from sgr.research.win_totals import project_season_win_totals
 from sgr.models import NFLSeasonType
 
 app = typer.Typer(help="Sports gambling research CLI")
+from sgr.paper.cli import app as campaign_app
+app.add_typer(campaign_app, name="campaign")
 console = Console()
 
 
