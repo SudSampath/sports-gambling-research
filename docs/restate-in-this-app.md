@@ -1,5 +1,59 @@
 # Durable Polymarket research and fictional paper execution
 
+The [public Research Desk](https://sudsampath.github.io/sports-gambling-research/)
+is a hosted, read-only view of reviewed evidence. Restate runs with the local
+Python worker for bounded campaigns. The dashboard never calls the Restate
+ingress or starts execution. See [public export and hosting](public-dashboard.md).
+
+## Follow one decision
+
+```mermaid
+sequenceDiagram
+    participant Scan as ScanCampaign
+    participant Analysis as CandidateAnalysis
+    participant Trade as PaperTrade
+    participant Gate as PaperPortfolio
+    participant Ledger as SQLite ledger
+    Scan->>Scan: Journal page and coherent snapshots
+    Scan->>Analysis: Bounded fan-out with frozen input manifest
+    Analysis->>Analysis: Exact matching and point-in-time forecast
+    Analysis->>Trade: Stable decision ID and archived lineage
+    Trade->>Gate: Reserve within fixed portfolio policy
+    Gate->>Ledger: Atomic idempotent reservation
+    Trade->>Trade: Durable latency timer
+    Trade->>Gate: Revalidate fresh ask book, simulate fill
+    Gate->>Ledger: Commit one fill under stable operation key
+    Note over Trade,Ledger: Response can be lost after commit
+    Trade->>Gate: Resume and reconcile existing effect
+    Gate->>Ledger: Read committed fill before retry
+    Trade->>Trade: Expire remaining reservation; preserve inventory
+    Trade->>Gate: Final rule-verified paper settlement
+    Gate->>Ledger: Apply payout once and reconcile
+```
+
+The implementation is in [workflows.py](../src/sgr/paper/workflows.py).
+`ctx.run_typed` journals external reads/computation/effects at meaningful
+boundaries. Durable timers handle latency, expiry and scheduled rechecks.
+`CandidateAnalysis` freezes data lineage before calculating a probability;
+`PaperTrade` carries that decision through its lifecycle. `PaperPortfolio` is a
+keyed virtual object, with one serialized gate per fictional portfolio rather
+than one global object for all market updates.
+
+Restate replay does not make a database write intrinsically safe. The
+[ledger](../src/sgr/paper/ledger.py) independently keys reservations, fills and
+settlements and uses `BEGIN IMMEDIATE` transactions. On a lost acknowledgement,
+the gate reads an existing fill before checking whether a fresh admission is
+allowed. Expiry can release remaining cash without forgetting already filled
+inventory. Reconciliation and final settlement remain possible after a scan's
+admission deadline.
+
+The [campaign catalog](../src/sgr/paper/campaigns.py) stores frozen specs,
+checkpoints, manifests, analysis results and immutable trade requests. Snapshot
+storage and canonical point-in-time history remain in the existing DuckDB
+research foundation. The [public exporter](../src/sgr/paper/public_report.py)
+produces a validated read model after the run; hosting that model adds no
+durable execution responsibility to the browser.
+
 This tool uses public market data and a fictional bankroll. There are no live
 order endpoints, signing, wallet funding, account imports, or location bypasses.
 Eligible decisions paper-execute within a fixed policy without per-candidate
@@ -173,16 +227,11 @@ model inputs were supplied. Live evidence therefore proves bounded discovery
 and screening; synthetic HTTP/native tests prove the remaining lifecycle. This
 does not prove a live forecast-to-fill trade, postseason calibration, or profit.
 
-Restate materially recovered workflow progress, child operations, and timers
-across process loss. It still required independent ledger transactions,
-reconciliation, immutable data, and source validation. It adds journal storage,
-memory, latency, and deployment/state-compatibility work. There is no benchmark
-against a competing non-Restate implementation. Observed results justify
-prospective data collection and exact model validation, not profitability claims.
-SUD-198 tracks tie-aware pricing; SUD-199 tracks prospective books/injury snapshots
-and an untouched chronological holdout. Prior 2023–2025 strategy selection is not
-a fresh holdout; disclose multiple testing. Price-history-only backtests cannot
-establish realistic fills without historical depth, fees and availability data.
+Reliability is the primary criterion for evaluating Restate here. It recovered workflow progress, child operations and timers across process loss, while independent ledger transactions and reconciliation preserved accounting. Replay and lost-ack tests checked recovery correctness rather than an uptime percentage. The measured results support its role in this workflow.
+
+Restate adds journal storage, memory, latency and deployment/state-compatibility work. These tests used one machine with persisted storage. Sustained reliability rates, recovery latency, machine/storage-loss recovery and high-availability failover have not been measured. There is no benchmark against a competing non-Restate implementation.
+
+The market-research evaluation is separate. SUD-198 tracks tie-aware pricing; SUD-199 tracks prospective books/injury snapshots and an untouched chronological holdout. Prior 2023–2025 strategy selection is not a fresh holdout; disclose multiple testing. Price-history-only backtests cannot establish realistic fills without historical depth, fees and availability data.
 
 Raw data, reports, runtime state, and credentials stay outside tracked files in
 ignored `data/`, `.research/`, `.runs/`, and `.tools/`.

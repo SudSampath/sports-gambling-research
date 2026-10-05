@@ -29,4 +29,8 @@ build/
 dist/
 *.egg-info/
 .idea/
+/web/dist/
+/web/node_modules/
+/web/test-results/
+/web/playwright-report/
 .vscode/
