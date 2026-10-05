@@ -124,11 +124,15 @@ See [execution assumptions](paper-execution.md) and [verified APIs](polymarket-d
 .venv/bin/python -m sgr.cli --help
 git diff --check
 SGR_RUN_RESTATE_TESTS=1 .venv/bin/python -m pytest \
-  tests/bdd/test_restate_steps.py -vv --tb=short
+  tests/bdd/test_restate_steps.py -vv --tb=short \
+  --basetemp .research/restate-validation-run
 ```
 
-Set `RESTATE_SERVER` first. Native tests use fresh temporary state, stop their
+Set `RESTATE_SERVER` first. Native tests use fresh isolated state, stop their
 own process groups in `finally`, and write ignored `.research/restate-evidence.json`.
+Use a fresh `--basetemp` directory per run to preserve raw snapshots, catalog,
+ledger, runtime journals, and logs in the project; pytest replaces an explicitly
+reused base directory. The delivered run is `.research/restate-delivery-20261005/`.
 Only the bounded public discovery case needs internet. Ordinary tests skip the
 four explicit native scenarios; run both suites. HTTP fixture execution is
 synthetic evidence, not a live trade. For a separate synthetic campaign:
@@ -146,12 +150,12 @@ testing its exposure cap.
 ## Measurements and candid assessment
 
 On an Apple Silicon Mac, Restate 1.7.13 / SDK 1.0.5 screened 10,000 synthetic
-candidates in 30.01 seconds (333.2/second), found 50 eligible decisions, and opened
+candidates in 30.23 seconds (330.8/second), found 50 eligible decisions, and opened
 four paper positions. Public requests: zero; reserved capital returned to zero
 and all accounting invariants held. Sampled peak process-group RSS: worker
-291,440 KiB, runtime 380,848 KiB. Sampled CPU deltas: 13.85 and 1.31 seconds.
+272,976 KiB, runtime 374,400 KiB. Sampled CPU deltas: 14.22 and 1.32 seconds.
 These are sampled process-group figures, not whole-machine peaks. Catalog size
-63,598,592 bytes includes earlier recovery/pause/stress cases; it is not an
+63,594,496 bytes includes earlier recovery/pause/stress cases; it is not an
 isolated per-campaign size. Performance varies with hardware/journal size.
 
 Recovery killed both worker and runtime after a committed fill/lost response.
@@ -163,7 +167,7 @@ future timestamp in this proof. Pause held page progress, cash and fill costs
 stable, and CLI resume completed the campaign.
 
 The live run screened 500 unique public markets, five pages, six GET attempts,
-in 3.52 seconds: 476 unsupported outcomes, 24 unavailable/expired, zero eligible
+in 4.65 seconds: 476 unsupported outcomes, 24 unavailable/expired, zero eligible
 trades, zero positions. No audited live interpretation catalog or suitable live
 model inputs were supplied. Live evidence therefore proves bounded discovery
 and screening; synthetic HTTP/native tests prove the remaining lifecycle. This
