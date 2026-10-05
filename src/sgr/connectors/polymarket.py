@@ -133,7 +133,8 @@ class PolymarketConnector:
 
     async def _get(self, host: str, path: str, params: dict, *, ttl: float = 0):
         allowed = {GAMMA: {"/markets/keyset", "/sports"}, CLOB: {"/book", "/fee-rate", "/tick-size"}}
-        if path not in allowed.get(host, set()):
+        detail_path = host == GAMMA and path.startswith("/markets/") and path[len("/markets/"):].isdigit()
+        if path not in allowed.get(host, set()) and not detail_path:
             raise ValueError("Endpoint is outside the public market-data allowlist.")
         key = json.dumps([host, path, params], sort_keys=True)
         cached = self.cache.get(key)
@@ -222,6 +223,17 @@ class PolymarketConnector:
         if records:
             self.store.write(records)
         return MarketPage(tuple(markets), next_cursor, len(payload["markets"]), tuple(exclusions), source)
+
+    async def refresh(self, market: PolymarketMarket) -> tuple[PolymarketMarket, dict, RawSnapshotRef]:
+        payload, source = await self._get(GAMMA, "/markets/" + market.external_id, {})
+        try:
+            event, current = normalize_market(payload, source)
+            if current.condition_id != market.condition_id:
+                raise ValueError("Condition identity changed.")
+        except (KeyError, TypeError, ValueError, AttributeError) as error:
+            raise SchemaDrift("Current market identity/rules are incoherent.") from error
+        self.store.write([event, current])
+        return current, payload, source
 
     async def book(self, market: PolymarketMarket, asset_id: str) -> TokenBookSnapshot:
         if asset_id not in market.asset_ids:

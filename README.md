@@ -4,7 +4,7 @@ A public, research-only Python project for evaluating NFL event-market signals. 
 
 ## Goals
 
-- Build reproducible, point-in-time NFL win-probability research—not an autonomous execution system.
+- Build reproducible, point-in-time NFL win-probability research and bounded autonomous fictional paper execution.
 - Compare independently generated model probabilities with equivalent Kalshi contracts after accounting for quotes, fees, liquidity, timing, and settlement rules.
 - Backtest using only information available before a simulated decision time; measure calibration, log loss, Brier score, and friction-aware paper-trade performance.
 - Record data provenance, model version, inputs, and rejection reasons so every recommendation can be recreated.
@@ -36,6 +36,10 @@ A combined "blend" of injuries + turnover + SOS was also evaluated (`candidate_c
 - Claims of guaranteed profit or betting advice.
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for contribution, test, security, and Claude Code review expectations.
+
+For Polymarket discovery, exact contract coverage, fictional portfolio policy,
+durable campaigns, CLI commands and recovery evidence, see
+[Restate in this app](docs/restate-in-this-app.md).
 
 The current implementation PRD (draft) is at [docs/PRD.md](docs/PRD.md).
 
