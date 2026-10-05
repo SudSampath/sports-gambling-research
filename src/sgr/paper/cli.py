@@ -188,7 +188,11 @@ def settlements(campaign_id: str, pass_id: str = typer.Option("pass-1", "--pass-
         if decision and decision["id"] in positions and decision["id"] not in submitted and len(submitted) < 20:
             submitted.add(decision["id"])
             request = {"settlement_pass": pass_id}
-            response = httpx.post(f"{INGRESS}/PaperTrade/{decision['id']}/settlement", json=request, timeout=30)
+            try:
+                response = httpx.post(f"{INGRESS}/PaperTrade/{decision['id']}/settlement", json=request, timeout=30)
+            except httpx.HTTPError:
+                typer.echo(json.dumps({"decision_id": decision["id"], "status": "settlement_network_error"}))
+                continue
             if response.is_error:
                 typer.echo(json.dumps({"decision_id": decision["id"], "status": "settlement_failed",
                                        "http_status": response.status_code}))

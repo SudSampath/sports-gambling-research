@@ -80,14 +80,55 @@ def test_public_workflow_operations_forecast_fill_and_poll_final_outcome(tmp_pat
     final = True
     from sgr.paper.models import AnalysisDecision
     decision = AnalysisDecision.model_validate(analysis["decision"])
-    outcome = asyncio.run(workflows.poll_settlement(spec, c["market"], decision, "pass-1"))
-    settled = workflows.portfolio_effect(spec.portfolio, {"spec": spec.model_dump(mode="json"), "action": "settle",
-        "decision_id": decision.id, "payout": outcome["payout"], "now": outcome["observed_at"],
-        "rule_version": decision.rule_version, "source": outcome["source"]})
+    catalog.save_trade_request(decision.id, {"spec": spec.model_dump(mode="json"), "decision": analysis["decision"],
+        "market": snapshots["market"], "definitions": request["definitions"]})
+    class MissingPublicWorkflowState:
+        def set(self, key, value):
+            pass
+        async def get(self, name):
+            return None
+        def key(self):
+            return decision.id
+        async def time(self):
+            return (NOW+timedelta(days=2)).timestamp()
+        async def run_typed(self, name, function, options, *args):
+            import inspect
+            result = function(*args)
+            return await result if inspect.isawaitable(result) else result
+        async def object_call(self, function, key, arg):
+            return workflows.portfolio_effect(key, arg)
+    settled = asyncio.run(workflows.settlement(MissingPublicWorkflowState(), {"settlement_pass": "pass-1"}))
     assert settled["status"] == "settled"
+    replay = asyncio.run(workflows.trade(MissingPublicWorkflowState(), catalog.trade_request(decision.id)))
+    assert replay["status"] == "settled"
     catalog.result(spec.id, request["key"], {"decision": analysis["decision"]})
     assert workflows.project_evidence(spec) == {"forecasts": 1}
     assert len(store.load_all("forecast")) == 1
+
+
+def test_risk_gate_checks_original_bounds_and_preserves_existing_effects(tmp_path, monkeypatch):
+    c = setup_paper(tmp_path)
+    monkeypatch.setattr(workflows, "ROOT", tmp_path)
+    catalog = Catalog(tmp_path)
+    monkeypatch.setattr(workflows, "_catalog", catalog)
+    spec = CampaignSpec(id="gate", max_seconds=1)
+    catalog.start(spec, NOW)
+    request = {"spec": spec.model_dump(mode="json"), "action": "reserve", "now": NOW.isoformat(),
+               "decision": c["decision"].model_dump(mode="json")}
+    changed = {**request, "spec": spec.model_copy(update={"max_seconds": 30}).model_dump(mode="json")}
+    with pytest.raises(ValueError, match="changed"):
+        workflows.portfolio_effect(spec.portfolio, changed)
+    assert workflows.portfolio_effect(spec.portfolio, {**request, "now": (NOW+timedelta(seconds=2)).isoformat()})["status"] == "rejected"
+    catalog.checkpoint(spec.id, {"status": "completed"})
+    assert workflows.portfolio_effect(spec.portfolio, request)["status"] == "rejected"
+    catalog.checkpoint(spec.id, {"status": "running"})
+    assert workflows.portfolio_effect(spec.portfolio, request)["status"] == "reserved"
+    catalog.control(spec.id, True)
+    # Replay reads the existing reservation even when the campaign is paused/expired.
+    repeated = workflows.portfolio_effect(spec.portfolio, {**request, "now": (NOW+timedelta(seconds=2)).isoformat()})
+    assert repeated["status"] == "reserved"
+    with pytest.raises(ValueError, match="changed"):
+        workflows.portfolio_effect(spec.portfolio, changed)
 
 
 def test_settlement_recovers_archived_request_after_workflow_state_is_gone(tmp_path, monkeypatch):
@@ -145,3 +186,23 @@ def test_replay_after_workflow_retention_preserves_terminal_catalog(tmp_path, mo
     with pytest.raises(restate.TerminalError):
         asyncio.run(workflows.run(FreshWorkflowState(), changed.model_dump(mode="json")))
     assert catalog.report(spec.id) == before
+
+
+def test_settlement_pass_continues_after_a_network_error(monkeypatch, capsys):
+    from sgr.paper import cli
+    spec = CampaignSpec(id="network")
+    monkeypatch.setattr(cli, "report_data", lambda _: {
+        "campaign": {"spec": spec.model_dump(mode="json")},
+        "portfolio": {"positions": [{"decision": d, "status": "filled"} for d in ("first", "second")]},
+        "results": [{"decision": {"id": d}} for d in ("first", "second")]})
+    calls = []
+    def post(url, **kwargs):
+        calls.append(url)
+        if len(calls) == 1:
+            raise httpx.ReadTimeout("synthetic timeout")
+        return httpx.Response(200, json={"status": "settled"})
+    monkeypatch.setattr(cli.httpx, "post", post)
+    cli.settlements(spec.id, pass_id="test")
+    assert len(calls) == 2
+    output = capsys.readouterr().out
+    assert "settlement_network_error" in output and "settled" in output

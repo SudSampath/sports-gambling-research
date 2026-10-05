@@ -146,12 +146,12 @@ testing its exposure cap.
 ## Measurements and candid assessment
 
 On an Apple Silicon Mac, Restate 1.7.13 / SDK 1.0.5 screened 10,000 synthetic
-candidates in 30.18 seconds (331.3/second), found 50 eligible decisions, and opened
+candidates in 30.01 seconds (333.2/second), found 50 eligible decisions, and opened
 four paper positions. Public requests: zero; reserved capital returned to zero
 and all accounting invariants held. Sampled peak process-group RSS: worker
-262,112 KiB, runtime 383,136 KiB. Sampled CPU deltas: 14.12 and 1.45 seconds.
+291,440 KiB, runtime 380,848 KiB. Sampled CPU deltas: 13.85 and 1.31 seconds.
 These are sampled process-group figures, not whole-machine peaks. Catalog size
-63,594,496 bytes includes earlier recovery/pause/stress cases; it is not an
+63,598,592 bytes includes earlier recovery/pause/stress cases; it is not an
 isolated per-campaign size. Performance varies with hardware/journal size.
 
 Recovery killed both worker and runtime after a committed fill/lost response.
@@ -163,7 +163,7 @@ future timestamp in this proof. Pause held page progress, cash and fill costs
 stable, and CLI resume completed the campaign.
 
 The live run screened 500 unique public markets, five pages, six GET attempts,
-in 4.81 seconds: 476 unsupported outcomes, 24 unavailable/expired, zero eligible
+in 3.52 seconds: 476 unsupported outcomes, 24 unavailable/expired, zero eligible
 trades, zero positions. No audited live interpretation catalog or suitable live
 model inputs were supplied. Live evidence therefore proves bounded discovery
 and screening; synthetic HTTP/native tests prove the remaining lifecycle. This

@@ -29,6 +29,11 @@ def fee_per_share(price: Decimal, bps: int) -> Decimal:
     return Decimal(bps) / 10000 * price * (1 - price)
 
 
+def same_decision(payload: str, decision: AnalysisDecision) -> bool:
+    """JSON object order is not evidence; validated values and array order are."""
+    return AnalysisDecision.model_validate_json(payload) == decision
+
+
 def fresh(book: TokenBookSnapshot, now: datetime, policy: PaperPolicy) -> bool:
     return (
         book.feed_ok and book.observed_at <= book.available_at <= now
@@ -107,7 +112,7 @@ class Ledger:
         with self.transaction() as conn:
             old = conn.execute("SELECT * FROM reservations WHERE portfolio=? AND decision=?", (self.portfolio, decision.id)).fetchone()
             if old:
-                if old["payload"] != payload:
+                if not same_decision(old["payload"], decision):
                     raise ValueError("Decision identity reused with different immutable evidence.")
                 return {**dict(old), "rejection_reason": old["reason"] or None}
             self._expire(conn, now)
@@ -149,6 +154,13 @@ class Ledger:
             result["rejection_reason"] = reason
             return result
 
+    def existing_reservation(self, decision: AnalysisDecision) -> dict | None:
+        with self.transaction() as conn:
+            row = conn.execute("SELECT * FROM reservations WHERE portfolio=? AND decision=?", (self.portfolio, decision.id)).fetchone()
+            if row is not None and not same_decision(row["payload"], decision):
+                raise ValueError("Reservation identity/evidence mismatch.")
+            return dict(row) if row is not None else None
+
     def existing_fill(self, decision_id: str) -> dict | None:
         with self.transaction() as conn:
             row = conn.execute("SELECT payload FROM fills WHERE portfolio=? AND decision=?", (self.portfolio, decision_id)).fetchone()
@@ -158,23 +170,23 @@ class Ledger:
         operation = stable_record_id("paper_fill", self.portfolio, decision.id, "taker-v1")
         with self.transaction() as conn:
             r = conn.execute("SELECT * FROM reservations WHERE portfolio=? AND decision=?", (self.portfolio, decision.id)).fetchone()
-            if r is None or r["payload"] != decision.model_dump_json():
+            if r is None or not same_decision(r["payload"], decision):
                 raise ValueError("Paper execution identity/evidence mismatch.")
             old = conn.execute("SELECT payload FROM execution_results WHERE id=?", (operation,)).fetchone()
             if old:
                 return json.loads(old[0])
             r = conn.execute("SELECT * FROM reservations WHERE portfolio=? AND decision=?", (self.portfolio, decision.id)).fetchone()
-            if r is not None and r["payload"] == decision.model_dump_json() and r["status"] in ("expired", "cancelled", "rejected"):
+            if r is not None and same_decision(r["payload"], decision) and r["status"] in ("expired", "cancelled", "rejected"):
                 result = {"status": r["status"], "reason": r["reason"] or "reservation_already_released"}
                 conn.execute("INSERT INTO execution_results VALUES (?,?)", (operation, json.dumps(result)))
                 return result
-            if r is None or r["status"] != "reserved" or r["payload"] != decision.model_dump_json():
+            if r is None or r["status"] != "reserved" or not same_decision(r["payload"], decision):
                 raise ValueError("Paper fill requires the original active reservation.")
             effective_time = now if latency_already_elapsed else now + timedelta(milliseconds=self.policy.latency_ms)
             p = self._portfolio(conn)
             if p["paused"] or effective_time >= decision.expires_at or effective_time >= decision.kickoff_at or not fresh(book, effective_time, self.policy):
                 self._release(conn, r, "expired" if effective_time >= decision.expires_at else "cancelled")
-                if not fresh(book, effective_time, self.policy):
+                if effective_time < min(decision.expires_at, decision.kickoff_at) and not fresh(book, effective_time, self.policy):
                     conn.execute("UPDATE portfolios SET paused=CASE WHEN paused='' THEN 'data_freshness' ELSE paused END WHERE id=?", (self.portfolio,))
                 result = {"status": "expired" if effective_time >= decision.expires_at else "cancelled", "reason": "paused_or_stale_quote_or_expiry"}
                 conn.execute("INSERT INTO execution_results VALUES (?,?)", (operation, json.dumps(result)))

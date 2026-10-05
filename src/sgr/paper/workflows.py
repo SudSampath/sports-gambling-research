@@ -170,15 +170,19 @@ def portfolio_effect(key, request):
     action = request["action"]
     now = datetime.fromisoformat(request["now"])
     if action in ("reserve", "execute"):
+        campaign_state = catalog().status(spec.id)
+        if CampaignSpec.model_validate(campaign_state["spec"]) != spec:
+            raise ValueError("Campaign policy and bounds changed after initialization.")
         decision = AnalysisDecision.model_validate(request["decision"])
+        if action == "reserve":
+            existing = ledger.existing_reservation(decision)
+            if existing:
+                return existing
         if action == "execute":
             catalog().attempt(spec.id+":reconcile-fill:"+decision.id)
             existing = ledger.existing_fill(decision.id)
             if existing:
                 return ledger.execute(decision, TokenBookSnapshot.model_validate(request["book"]), now=now)
-        campaign_state = catalog().status(spec.id)
-        if CampaignSpec.model_validate(campaign_state["spec"]) != spec:
-            raise ValueError("Campaign policy and bounds changed after initialization.")
         expired_campaign = now >= datetime.fromisoformat(campaign_state["started"])+timedelta(seconds=spec.max_seconds)
         if campaign_state["paused"] or expired_campaign or campaign_state["status"] in TERMINAL:
             if action == "execute":
@@ -251,7 +255,8 @@ async def trade(ctx: restate.WorkflowContext, request: dict) -> dict:
     ctx.set("status", {"phase": "reserving"})
     reservation = await gate(ctx, spec, "reserve", now, decision=request["decision"])
     if reservation["status"] != "reserved":
-        return {"status": "rejected", "reservation": reservation}
+        ctx.set("status", {"phase": reservation["status"]})
+        return {"status": reservation["status"], "reservation": reservation}
     ctx.set("status", {"phase": "simulated_submission"})
     try:
         await ctx.sleep(timedelta(milliseconds=spec.policy.latency_ms), name="simulated-submission-latency")

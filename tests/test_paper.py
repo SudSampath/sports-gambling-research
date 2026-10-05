@@ -43,6 +43,29 @@ def test_another_reservation_can_expire_an_order_before_its_execution(tmp_path):
     assert ledger.reconcile()["ok"] and not ledger.reconcile()["paused"]
 
 
+def test_expired_decision_with_old_book_does_not_pause_portfolio(tmp_path):
+    c = setup_paper(tmp_path)
+    ledger, d = c["ledger"], c["decision"]
+    ledger.reserve(d, now=NOW)
+    assert ledger.execute(d, c["book"], now=d.expires_at)["status"] == "expired"
+    assert not ledger.reconcile()["paused"]
+
+
+def test_archived_json_key_order_preserves_decision_identity(tmp_path):
+    import json
+    from sgr.paper.models import AnalysisDecision
+    c = setup_paper(tmp_path)
+    ledger, d = c["ledger"], c["decision"]
+    archived = AnalysisDecision.model_validate_json(json.dumps(d.model_dump(mode="json"), sort_keys=True))
+    original = ledger.reserve(d, now=NOW)
+    assert ledger.reserve(archived, now=NOW) == original
+    fill = ledger.execute(d, c["book"], now=NOW)
+    assert ledger.execute(archived, c["book"], now=NOW) == fill
+    changed = archived.model_copy(update={"input_digest": "f"*64})
+    with pytest.raises(ValueError, match="identity"):
+        ledger.reserve(changed, now=NOW)
+
+
 def test_vertical_forecast_reservation_fill_reconcile_settlement(tmp_path):
     c = setup_paper(tmp_path)
     ledger, d = c["ledger"], c["decision"]
