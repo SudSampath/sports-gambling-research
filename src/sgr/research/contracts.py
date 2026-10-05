@@ -20,6 +20,9 @@ class ContractDefinition(BaseModel):
     kickoff_at: datetime
     deadline_at: datetime
     outcomes: tuple[str, str]
+    asset_ids: tuple[str, str]
+    resolution_source: str
+    available_at: datetime
     home_outcome_index: int = Field(ge=0, le=1)
     outcome_type: Literal["game_winner"] = "game_winner"
     includes_overtime: Literal[True] = True
@@ -56,13 +59,19 @@ def match_contract(
         return reject("unsupported_outcome")
     if market.negative_risk:
         return reject("negative_risk_settlement_unsupported")
-    matched = [d for d in definitions if d.condition_id == market.condition_id]
+    matched = [d for d in definitions if d.condition_id == market.condition_id
+               and d.available_at.tzinfo is not None and d.available_at <= decision_at]
     if len(matched) != 1:
         return reject("ambiguous_or_unaudited_settlement_rules")
     definition = matched[0]
     if (
         definition.rule_version != market.rule_version
         or definition.outcomes != market.outcomes
+        or definition.asset_ids != market.asset_ids
+        or definition.resolution_source != market.resolution_source
+        or definition.available_at.tzinfo is None
+        or definition.available_at > decision_at
+        or definition.deadline_at <= definition.kickoff_at
         or definition.deadline_at != market.deadline_at
         or definition.kickoff_at != market.game_start_at
         or definition.rule_quote not in market.rules

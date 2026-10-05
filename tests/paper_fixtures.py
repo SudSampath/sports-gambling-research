@@ -47,6 +47,7 @@ def contract(index=1):
         game_id=target.id, home_team_id=target.home_team_id, away_team_id=target.away_team_id,
         kickoff_at=target.kickoff_at, deadline_at=market.deadline_at, outcomes=market.outcomes,
         home_outcome_index=0, tie_payout="0.5", rule_source_url="https://polymarket.com/event/" + market.slug,
+        asset_ids=market.asset_ids, resolution_source=market.resolution_source, available_at=NOW,
         rule_quote=RULES,
     )
     return market, target, definition

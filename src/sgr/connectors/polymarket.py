@@ -74,7 +74,7 @@ def normalize_market(row: dict, source: RawSnapshotRef) -> tuple[PolymarketEvent
         raise ValueError("Ambiguous event identity.")
     event = events[0]
     now = source.retrieved_at
-    event_id = stable_record_id("polymarket_event", event["id"], source.sha256)
+    event_id = stable_record_id("polymarket_event", event["id"], source.sha256, now.isoformat())
     base = dict(event_time=now, retrieved_at=now, source_snapshots=(source,))
     canonical_event = PolymarketEvent(
         id=event_id, provider_ids={"gamma": str(event["id"])}, external_id=str(event["id"]),
@@ -83,7 +83,7 @@ def normalize_market(row: dict, source: RawSnapshotRef) -> tuple[PolymarketEvent
     rules = row["description"]
     condition = row["conditionId"]
     market = PolymarketMarket(
-        id=stable_record_id("polymarket_market", condition, source.sha256),
+        id=stable_record_id("polymarket_market", condition, source.sha256, now.isoformat()),
         provider_ids={"gamma": str(row["id"]), "condition": condition},
         external_id=str(row["id"]), condition_id=condition, event_id=event_id,
         slug=row["slug"], question=row["question"],
@@ -137,7 +137,7 @@ class PolymarketConnector:
             raise ValueError("Endpoint is outside the public market-data allowlist.")
         key = json.dumps([host, path, params], sort_keys=True)
         cached = self.cache.get(key)
-        if cached and time.monotonic() - cached[0] <= ttl:
+        if ttl > 0 and cached and time.monotonic() - cached[0] <= ttl:
             self.budget.cache_hits += 1
             return cached[1], cached[2]
         async with self.semaphore:
@@ -162,22 +162,36 @@ class PolymarketConnector:
                         "polymarket", {"request": params, "response": payload},
                         source_url=host + path, retrieved_at=self.clock(),
                     )
-                    self.cache[key] = (time.monotonic(), payload, source)
+                    if ttl > 0:
+                        if len(self.cache) >= 128 and key not in self.cache:
+                            self.cache.pop(next(iter(self.cache)))
+                        self.cache[key] = (time.monotonic(), payload, source)
                     return payload, source
                 except (httpx.HTTPError, json.JSONDecodeError) as error:
                     retryable = not isinstance(error, httpx.HTTPStatusError) or error.response.status_code == 429 or error.response.status_code >= 500
                     if not retryable or attempt == 2:
                         raise APIRequestError("Public Polymarket data unavailable; no execution permitted.") from error
                     self.budget.retries += 1
-                    await asyncio.sleep(.25 * 2**attempt)
+                    delay = .25 * 2**attempt
+                    if isinstance(error, httpx.HTTPStatusError):
+                        try:
+                            delay = max(delay, min(5, float(error.response.headers.get("Retry-After", 0))))
+                        except ValueError:
+                            pass
+                    await asyncio.sleep(delay)
         raise AssertionError("Unreachable")
 
     async def nfl_tag(self) -> int:
         payload, _ = await self._get(GAMMA, "/sports", {}, ttl=3600)
+        if not isinstance(payload, list) or not all(isinstance(x, dict) for x in payload):
+            raise SchemaDrift("Sports discovery response is malformed.")
         matches = [x for x in payload if x.get("sport") == "nfl"]
         if len(matches) != 1:
             raise SchemaDrift("NFL discovery tag is ambiguous.")
-        return int(matches[0]["primaryTagId"])
+        try:
+            return int(matches[0]["primaryTagId"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise SchemaDrift("NFL primary tag is missing.") from error
 
     async def page(self, cursor: str | None = None, *, limit: int = 100, tag_id: int | None = None) -> MarketPage:
         if not 1 <= limit <= 100:
@@ -203,7 +217,7 @@ class PolymarketConnector:
                 seen.add(market.condition_id)
                 records.extend((event, market))
                 markets.append(market)
-            except (KeyError, TypeError, ValueError):
+            except (KeyError, TypeError, ValueError, AttributeError):
                 exclusions.append("schema_or_identity_ambiguity")
         if records:
             self.store.write(records)
@@ -213,17 +227,25 @@ class PolymarketConnector:
         if asset_id not in market.asset_ids:
             raise ValueError("Asset does not belong to contract.")
         # Always fetch a new book; metadata may be cached only briefly.
-        (payload, source), (fees, fee_source), (ticks, tick_source) = await asyncio.gather(
-            self._get(CLOB, "/book", {"token_id": asset_id}),
-            self._get(CLOB, "/fee-rate", {"token_id": asset_id}, ttl=30),
-            self._get(CLOB, "/tick-size", {"token_id": asset_id}, ttl=30),
-        )
+        tasks = [asyncio.create_task(self._get(CLOB, path, {"token_id": asset_id}, ttl=ttl))
+                 for path, ttl in (("/book", 0), ("/fee-rate", 30), ("/tick-size", 30))]
+        try:
+            (payload, source), (fees, fee_source), (ticks, tick_source) = await asyncio.gather(*tasks)
+        except BaseException:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
         try:
             if payload["asset_id"] != asset_id or payload["market"] != market.condition_id:
                 raise ValueError("Provider book identity mismatch.")
             raw_time = Decimal(payload["timestamp"])
             # Current CLOB timestamps are milliseconds; tolerate documented seconds.
             observed = datetime.fromtimestamp(float(raw_time / (1000 if raw_time > 10**11 else 1)), timezone.utc)
+            if not 0 <= (source.retrieved_at - observed).total_seconds() <= 10:
+                raise ValueError("Provider book is stale or future-dated.")
+            if payload["neg_risk"] != market.negative_risk:
+                raise ValueError("Negative-risk parameters changed.")
             tick = Decimal(str(ticks["minimum_tick_size"]))
             if tick != Decimal(payload["tick_size"]):
                 raise ValueError("Tick parameters disagree.")
@@ -241,6 +263,7 @@ class PolymarketConnector:
                 observed_at=observed, available_at=max(s.retrieved_at for s in (source, fee_source, tick_source)),
                 bids=levels("bids"), asks=levels("asks"), tick_size=tick,
                 minimum_order_size=Decimal(payload["min_order_size"]), fee_rate_bps=fees["base_fee"],
+                metadata_at=min(fee_source.retrieved_at, tick_source.retrieved_at),
             )
         except (KeyError, TypeError, ValueError) as error:
             raise SchemaDrift("Book/fee/tick evidence is incoherent.") from error

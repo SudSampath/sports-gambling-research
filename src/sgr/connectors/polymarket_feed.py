@@ -21,6 +21,9 @@ class BookFeed:
         self.updated: dict[str, datetime] = {}
         self.seen: dict[str, float] = {}
         self.invalid = set(self.seeds)
+        self.metadata_invalid: set[str] = set()
+        self.metadata_at = {b.asset_id: b.metadata_at or b.available_at for b in seeds}
+        self.history: dict[str, list[dict]] = {b.asset_id: [] for b in seeds}
         self.max_age_seconds = max_age_seconds
         self.messages = 0
 
@@ -29,7 +32,12 @@ class BookFeed:
 
     def ingest(self, message: dict, *, received_at: datetime):
         self.messages += 1
+        if not isinstance(message, dict):
+            self.gap()
+            return
         kind = message.get("event_type")
+        if kind in ("best_bid_ask", "last_trade_price", "new_market"):
+            return
         try:
             timestamp = datetime.fromtimestamp(int(message["timestamp"]) / 1000, timezone.utc)
             changes = message.get("price_changes", []) if kind == "price_change" else [message]
@@ -44,11 +52,16 @@ class BookFeed:
                     self.invalid.add(asset)
                     continue
                 if kind == "book":
+                    if any(len(message[side]) != len({Decimal(x["price"]) for x in message[side]}) for side in ("bids", "asks")):
+                        self.invalid.add(asset)
+                        continue
                     self.depth[asset] = {
                         side: {Decimal(x["price"]): Decimal(x["size"]) for x in message[side]}
                         for side in ("bids", "asks")
                     }
-                    self.invalid.discard(asset)
+                    if asset not in self.metadata_invalid:
+                        self.invalid.discard(asset)
+                    self.history[asset].clear()
                 elif kind == "price_change" and asset not in self.invalid:
                     side = {"BUY": "bids", "SELL": "asks"}[change["side"]]
                     price, size = Decimal(change["price"]), Decimal(change["size"])
@@ -59,6 +72,12 @@ class BookFeed:
                 else:
                     # Tick changes and lifecycle updates need a new REST seed.
                     self.invalid.add(asset)
+                    if kind == "tick_size_change":
+                        self.metadata_invalid.add(asset)
+                self.history[asset].append(message)
+                if len(self.history[asset]) > 1000:
+                    self.history[asset].clear()
+                    self.gap()
                 self.updated[asset] = timestamp
                 self.seen[asset] = time.monotonic()
         except (KeyError, TypeError, ValueError, ArithmeticError):
@@ -70,6 +89,7 @@ class BookFeed:
             asset not in self.invalid and observed is not None
             and 0 <= (now - observed).total_seconds() <= self.max_age_seconds
             and time.monotonic() - self.seen[asset] <= self.max_age_seconds
+            and 0 <= (now - self.metadata_at[asset]).total_seconds() <= 30
         )
 
     def persist(self, store: ResearchStore, asset: str, *, now: datetime) -> TokenBookSnapshot:
@@ -78,7 +98,8 @@ class BookFeed:
         seed = self.seeds[asset]
         payload = {s: [{"price": str(p), "size": str(q)} for p, q in self.depth[asset][s].items()] for s in ("bids", "asks")}
         source = store.retain_raw_snapshot(
-            "polymarket", {"asset_id": asset, "observed_at": self.updated[asset].isoformat(), **payload},
+            "polymarket_derived", {"kind": "reconstructed_public_stream", "events": self.history[asset],
+                                  "asset_id": asset, "observed_at": self.updated[asset].isoformat(), **payload},
             source_url=MARKET_STREAM, retrieved_at=now,
         )
         updates = dict(
@@ -91,12 +112,14 @@ class BookFeed:
         # model_copy skips validation, so explicitly revalidate the complete book.
         book = TokenBookSnapshot.model_validate({**seed.model_dump(), **updates})
         store.write([book])
+        self.history[asset].clear()
+        self.seeds[asset] = book
         return book
 
     async def collect(self, store: ResearchStore, *, seconds: float = 30, snapshot_interval: float = 5) -> dict:
         import websockets
-        if not 0 < seconds <= 300 or not 1 <= snapshot_interval <= seconds:
-            raise ValueError("Feed sessions must be explicitly bounded (<=300 seconds).")
+        if not 0 < seconds <= 30 or not 1 <= snapshot_interval <= seconds:
+            raise ValueError("Feed sessions must be explicitly bounded (<=30 seconds); reseed metadata between sessions.")
         snapshots, started, last = 0, time.monotonic(), time.monotonic()
         try:
             async with websockets.connect(MARKET_STREAM, max_queue=32, max_size=2**20) as socket:
@@ -110,7 +133,11 @@ class BookFeed:
                     if raw == "PONG":
                         continue
                     now = datetime.now(timezone.utc)
-                    messages = json.loads(raw)
+                    try:
+                        messages = json.loads(raw)
+                    except (ValueError, TypeError):
+                        self.gap()
+                        continue
                     for message in messages if isinstance(messages, list) else [messages]:
                         self.ingest(message, received_at=now)
                     if time.monotonic() - last >= snapshot_interval:

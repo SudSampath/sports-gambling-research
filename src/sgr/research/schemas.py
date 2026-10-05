@@ -214,6 +214,7 @@ class TokenBookSnapshot(CanonicalRecord):
     minimum_order_size: Decimal = Field(gt=0)
     fee_rate_bps: int = Field(ge=0, le=10000)
     fee_version: str = "polymarket-curve-2026-10"
+    metadata_at: datetime | None = None
     feed_ok: bool = True
 
     @model_validator(mode="after")
