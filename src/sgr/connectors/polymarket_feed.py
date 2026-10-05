@@ -1,0 +1,127 @@
+"""Bounded public subscriptions. Market ticks never invoke Restate."""
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+from datetime import datetime, timezone
+from decimal import Decimal
+
+from sgr.connectors.polymarket import MARKET_STREAM
+from sgr.research.schemas import PriceLevel, TokenBookSnapshot, stable_record_id
+from sgr.research.storage import ResearchStore
+
+
+class BookFeed:
+    def __init__(self, seeds: list[TokenBookSnapshot], *, max_age_seconds: float = 10):
+        if not seeds or len(seeds) > 100 or max_age_seconds <= 0:
+            raise ValueError("Subscribe to 1..100 selected assets with a bounded freshness window.")
+        self.seeds = {b.asset_id: b for b in seeds}
+        self.depth = {b.asset_id: {"bids": {}, "asks": {}} for b in seeds}
+        self.updated: dict[str, datetime] = {}
+        self.seen: dict[str, float] = {}
+        self.invalid = set(self.seeds)
+        self.max_age_seconds = max_age_seconds
+        self.messages = 0
+
+    def gap(self):
+        self.invalid.update(self.seeds)
+
+    def ingest(self, message: dict, *, received_at: datetime):
+        self.messages += 1
+        kind = message.get("event_type")
+        try:
+            timestamp = datetime.fromtimestamp(int(message["timestamp"]) / 1000, timezone.utc)
+            changes = message.get("price_changes", []) if kind == "price_change" else [message]
+            for change in changes:
+                asset = change["asset_id"]
+                if asset not in self.seeds:
+                    continue
+                if message.get("market") != self.seeds[asset].condition_id:
+                    self.invalid.add(asset)
+                    continue
+                if timestamp > received_at or timestamp < self.updated.get(asset, timestamp):
+                    self.invalid.add(asset)
+                    continue
+                if kind == "book":
+                    self.depth[asset] = {
+                        side: {Decimal(x["price"]): Decimal(x["size"]) for x in message[side]}
+                        for side in ("bids", "asks")
+                    }
+                    self.invalid.discard(asset)
+                elif kind == "price_change" and asset not in self.invalid:
+                    side = {"BUY": "bids", "SELL": "asks"}[change["side"]]
+                    price, size = Decimal(change["price"]), Decimal(change["size"])
+                    if size == 0:
+                        self.depth[asset][side].pop(price, None)
+                    else:
+                        self.depth[asset][side][price] = size
+                else:
+                    # Tick changes and lifecycle updates need a new REST seed.
+                    self.invalid.add(asset)
+                self.updated[asset] = timestamp
+                self.seen[asset] = time.monotonic()
+        except (KeyError, TypeError, ValueError, ArithmeticError):
+            self.gap()
+
+    def coherent(self, asset: str, now: datetime) -> bool:
+        observed = self.updated.get(asset)
+        return (
+            asset not in self.invalid and observed is not None
+            and 0 <= (now - observed).total_seconds() <= self.max_age_seconds
+            and time.monotonic() - self.seen[asset] <= self.max_age_seconds
+        )
+
+    def persist(self, store: ResearchStore, asset: str, *, now: datetime) -> TokenBookSnapshot:
+        if not self.coherent(asset, now):
+            raise ValueError("Feed gap or stale book; resynchronize first.")
+        seed = self.seeds[asset]
+        payload = {s: [{"price": str(p), "size": str(q)} for p, q in self.depth[asset][s].items()] for s in ("bids", "asks")}
+        source = store.retain_raw_snapshot(
+            "polymarket", {"asset_id": asset, "observed_at": self.updated[asset].isoformat(), **payload},
+            source_url=MARKET_STREAM, retrieved_at=now,
+        )
+        updates = dict(
+            id=stable_record_id("token_book_snapshot", asset, source.sha256, now.isoformat()),
+            event_time=self.updated[asset], observed_at=self.updated[asset], retrieved_at=now,
+            available_at=now, source_snapshots=(*seed.source_snapshots, source),
+            bids=tuple(PriceLevel(price_dollars=p, contracts=q) for p, q in sorted(self.depth[asset]["bids"].items(), reverse=True)),
+            asks=tuple(PriceLevel(price_dollars=p, contracts=q) for p, q in sorted(self.depth[asset]["asks"].items())),
+        )
+        # model_copy skips validation, so explicitly revalidate the complete book.
+        book = TokenBookSnapshot.model_validate({**seed.model_dump(), **updates})
+        store.write([book])
+        return book
+
+    async def collect(self, store: ResearchStore, *, seconds: float = 30, snapshot_interval: float = 5) -> dict:
+        import websockets
+        if not 0 < seconds <= 300 or not 1 <= snapshot_interval <= seconds:
+            raise ValueError("Feed sessions must be explicitly bounded (<=300 seconds).")
+        snapshots, started, last = 0, time.monotonic(), time.monotonic()
+        try:
+            async with websockets.connect(MARKET_STREAM, max_queue=32, max_size=2**20) as socket:
+                await socket.send(json.dumps({"assets_ids": list(self.seeds), "type": "market", "custom_feature_enabled": True}))
+                while time.monotonic() - started < seconds:
+                    try:
+                        raw = await asyncio.wait_for(socket.recv(), timeout=min(5, seconds - (time.monotonic() - started)))
+                    except asyncio.TimeoutError:
+                        await socket.send("PING")
+                        continue
+                    if raw == "PONG":
+                        continue
+                    now = datetime.now(timezone.utc)
+                    messages = json.loads(raw)
+                    for message in messages if isinstance(messages, list) else [messages]:
+                        self.ingest(message, received_at=now)
+                    if time.monotonic() - last >= snapshot_interval:
+                        for asset in self.seeds:
+                            if self.coherent(asset, now):
+                                try:
+                                    self.persist(store, asset, now=now)
+                                    snapshots += 1
+                                except ValueError:
+                                    self.invalid.add(asset)
+                        last = time.monotonic()
+        finally:
+            self.gap()
+        return {"messages": self.messages, "coherent_snapshots": snapshots, "seconds": time.monotonic() - started}

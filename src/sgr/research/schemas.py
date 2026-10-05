@@ -162,6 +162,72 @@ class OrderBookSnapshot(CanonicalRecord):
     no_bids: tuple[PriceLevel, ...] = ()
 
 
+class PolymarketEvent(CanonicalRecord):
+    entity_type: Literal["polymarket_event"] = "polymarket_event"
+    external_id: str
+    slug: str
+    title: str
+
+
+class PolymarketMarket(CanonicalRecord):
+    """An immutable discovery observation; identities survive changing metadata."""
+
+    entity_type: Literal["polymarket_market"] = "polymarket_market"
+    external_id: str
+    condition_id: str
+    event_id: str
+    slug: str
+    question: str
+    outcomes: tuple[str, ...]
+    asset_ids: tuple[str, ...]
+    rules: str
+    rule_version: str
+    resolution_source: str
+    deadline_at: datetime
+    game_start_at: datetime | None = None
+    available_at: datetime
+    market_type: str
+    active: bool
+    accepting_orders: bool
+    negative_risk: bool
+    fee_type: str
+
+    @model_validator(mode="after")
+    def outcome_assets_are_bijective(self) -> PolymarketMarket:
+        if len(self.outcomes) < 2 or len(self.outcomes) != len(self.asset_ids):
+            raise ValueError("Outcomes must map one-to-one to public asset IDs.")
+        if len(set(self.asset_ids)) != len(self.asset_ids) or len(set(self.outcomes)) != len(self.outcomes):
+            raise ValueError("Duplicate outcomes or assets.")
+        return self
+
+
+class TokenBookSnapshot(CanonicalRecord):
+    entity_type: Literal["token_book_snapshot"] = "token_book_snapshot"
+    market_id: str
+    condition_id: str
+    asset_id: str
+    observed_at: datetime
+    available_at: datetime
+    bids: tuple[PriceLevel, ...]
+    asks: tuple[PriceLevel, ...]
+    tick_size: Decimal = Field(gt=0, le=1)
+    minimum_order_size: Decimal = Field(gt=0)
+    fee_rate_bps: int = Field(ge=0, le=10000)
+    fee_version: str = "polymarket-curve-2026-10"
+    feed_ok: bool = True
+
+    @model_validator(mode="after")
+    def coherent_book(self) -> TokenBookSnapshot:
+        if self.bids and self.asks and max(x.price_dollars for x in self.bids) >= min(x.price_dollars for x in self.asks):
+            raise ValueError("Crossed book cannot support paper execution.")
+        for levels in (self.bids, self.asks):
+            if len({x.price_dollars for x in levels}) != len(levels):
+                raise ValueError("Duplicate book levels.")
+            if any(x.price_dollars % self.tick_size for x in levels):
+                raise ValueError("Price violates tick size.")
+        return self
+
+
 class Forecast(CanonicalRecord):
     entity_type: Literal["forecast"] = "forecast"
     game_id: str
@@ -358,6 +424,9 @@ RECORD_TYPES: dict[str, type[CanonicalRecord]] = {
         Outcome,
         AvailabilityReport,
         PlayerGameStatline,
+        PolymarketEvent,
+        PolymarketMarket,
+        TokenBookSnapshot,
     )
 }
 Migration = Callable[[dict[str, Any]], dict[str, Any]]
