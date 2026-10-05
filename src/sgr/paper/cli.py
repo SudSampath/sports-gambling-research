@@ -147,6 +147,20 @@ def report_data(campaign_id):
 
 
 @app.command()
+def export_public(campaign_id: str, public_id: str, out: Path):
+    """Export a validated public dashboard read model; review it before publishing."""
+    from sgr.paper.public_report import write_public_campaign
+
+    try:
+        model = write_public_campaign(report_data(campaign_id), public_id, out)
+    except (ValueError, KeyError) as exc:
+        raise typer.BadParameter("Public report validation failed; inspect the local report schema and accounting.") from exc
+    typer.echo(json.dumps({"public_id": model.public_id, "mode": model.mode,
+                           "completed_candidates": model.completed_candidates,
+                           "candidate_sample": len(model.candidates), "out": str(out)}))
+
+
+@app.command()
 def report(campaign_id: str, out: Path | None = None):
     """Coverage, exclusions, rankings, reservations and distinct outcomes."""
     data = report_data(campaign_id)

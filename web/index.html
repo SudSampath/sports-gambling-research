@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#102d2b">
+  <meta name="description" content="An open research desk for public event markets, reproducible NFL forecasts and durable fictional paper trading. Explore actual campaign coverage and Restate recovery evidence.">
+  <title>Research Desk · NFL Market Signals</title>
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <a href="#content" class="skip-link">Skip to research</a>
+  <aside class="sidebar">
+    <a class="brand" href="?view=overview"><img src="./icon.svg" alt="" width="38" height="38"><span>Research Desk<small>NFL MARKET SIGNALS</small></span></a>
+    <p class="nav-label">WORKSPACE</p>
+    <nav aria-label="Research views" id="navigation">
+      <button data-view="overview"><span aria-hidden="true">◫</span> Overview</button>
+      <button data-view="candidates"><span aria-hidden="true">⌕</span> Candidates</button>
+      <button data-view="portfolio"><span aria-hidden="true">▤</span> Paper portfolio</button>
+      <button data-view="restate"><span aria-hidden="true">↻</span> How Restate works</button>
+    </nav>
+    <div class="sidebar-bottom"><span class="small-dot"></span> Public research · fictional capital<p>Every decision leaves a trail.</p><a href="https://github.com/SudSampath/sports-gambling-research" target="_blank" rel="noreferrer">View source ↗</a><a href="https://github.com/SudSampath/sports-gambling-research/blob/main/README.md" target="_blank" rel="noreferrer">Read the documentation ↗</a></div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar"><div><span class="breadcrumb">RESEARCH / </span><span id="view-label">OVERVIEW</span></div><span class="archive-badge"><span class="small-dot"></span> Published evidence</span></header>
+    <main id="content" tabindex="-1">
+      <div class="page-heading"><div><p class="eyebrow">PUBLIC DATA. REPRODUCIBLE DECISIONS.</p><h1 id="page-title">A clearer view of the market.</h1><p id="page-subtitle">Explore what the system found, what it rejected, and why.</p></div><a class="source-link" href="https://github.com/SudSampath/sports-gambling-research/pulls" target="_blank" rel="noreferrer">Review the implementation ↗</a></div>
+      <div class="campaign-bar"><div><span class="field-label">CAMPAIGN</span><label class="sr-only" for="campaign-picker">Select campaign</label><select id="campaign-picker" disabled><option>Loading published reports…</option></select></div><div id="campaign-meta"></div><a id="download-report" class="quiet-link" download>Download public report ↓</a></div>
+      <div id="load-error" class="error" role="alert" hidden></div>
+      <p id="research-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
+      <div id="view"><p class="loading">Loading published research evidence…</p></div>
+      <footer><span>Fictional capital · research only. No betting advice or claim of profit.</span><a id="footer-docs" href="https://github.com/SudSampath/sports-gambling-research/blob/main/README.md" target="_blank" rel="noreferrer">Documentation ↗</a><a href="https://github.com/SudSampath/sports-gambling-research" target="_blank" rel="noreferrer">Source ↗</a><span id="build-label">Public read-only dashboard · bounded local execution</span></footer>
+    </main>
+  </div>
+  <dialog id="candidate-dialog" aria-labelledby="candidate-title"><div class="dialog-header"><p class="eyebrow">DECISION RECORD</p><button id="close-dialog" aria-label="Close decision record">×</button></div><div id="candidate-detail"></div></dialog>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

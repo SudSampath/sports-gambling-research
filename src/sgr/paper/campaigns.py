@@ -43,6 +43,8 @@ class CampaignSpec(BaseModel):
             raise ValueError("Fault injection only exists for labeled synthetic campaigns.")
         if self.mode == "synthetic" and not self.portfolio.startswith("synthetic-"):
             raise ValueError("Synthetic campaigns need a separate synthetic-* portfolio.")
+        if self.mode == "public" and self.portfolio.startswith("synthetic-"):
+            raise ValueError("Public campaigns cannot use a synthetic-* portfolio.")
         return self
 
 
