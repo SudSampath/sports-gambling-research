@@ -164,6 +164,10 @@ class Ledger:
             if old:
                 return json.loads(old[0])
             r = conn.execute("SELECT * FROM reservations WHERE portfolio=? AND decision=?", (self.portfolio, decision.id)).fetchone()
+            if r is not None and r["payload"] == decision.model_dump_json() and r["status"] in ("expired", "cancelled", "rejected"):
+                result = {"status": r["status"], "reason": r["reason"] or "reservation_already_released"}
+                conn.execute("INSERT INTO execution_results VALUES (?,?)", (operation, json.dumps(result)))
+                return result
             if r is None or r["status"] != "reserved" or r["payload"] != decision.model_dump_json():
                 raise ValueError("Paper fill requires the original active reservation.")
             effective_time = now if latency_already_elapsed else now + timedelta(milliseconds=self.policy.latency_ms)

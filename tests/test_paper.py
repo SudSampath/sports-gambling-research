@@ -30,6 +30,19 @@ def test_reporting_audit_is_read_only(tmp_path):
         audit.pause("must-fail")
 
 
+def test_another_reservation_can_expire_an_order_before_its_execution(tmp_path):
+    c = setup_paper(tmp_path)
+    ledger, d = c["ledger"], c["decision"]
+    ledger.reserve(d, now=NOW)
+    other = competing_decision(d, 122)
+    later = d.expires_at+timedelta(seconds=1)
+    ledger.reserve(other, now=later)
+    result = ledger.execute(d, c["book"], now=later)
+    assert result["status"] == "expired"
+    assert result == ledger.execute(d, c["book"], now=later+timedelta(seconds=5))
+    assert ledger.reconcile()["ok"] and not ledger.reconcile()["paused"]
+
+
 def test_vertical_forecast_reservation_fill_reconcile_settlement(tmp_path):
     c = setup_paper(tmp_path)
     ledger, d = c["ledger"], c["decision"]
