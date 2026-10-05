@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
+
+def fixed_paper_notional(bankroll: Decimal, requested: Decimal, cap: Decimal) -> Decimal:
+    """Fixed fictional stake; no probability-dependent Kelly scaling."""
+    if min(bankroll, requested, cap) < 0:
+        raise ValueError("Paper capital and stake bounds cannot be negative.")
+    return min(bankroll, requested, cap)
+
 
 def kelly_fraction(win_probability: float, decimal_odds: float, cap: float = 0.05) -> float:
     """Return capped Kelly bet fraction."""
