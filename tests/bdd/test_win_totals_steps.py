@@ -28,7 +28,7 @@ def _write_team(store: ResearchStore, abbr: str, source_snapshots) -> None:
                 id=stable_record_id("team", "espn", abbr),
                 provider_ids={"espn": abbr},
                 event_time=SEASON_START,
-                retrieved_at=SEASON_START,
+                retrieved_at=max(s.retrieved_at for s in source_snapshots),
                 source_snapshots=source_snapshots,
                 abbreviation=abbr,
                 display_name=f"Team {abbr}",
@@ -97,6 +97,13 @@ def _seed_partial_season(store: ResearchStore, completed_through_week: int) -> l
                 completed=i <= completed_through_week,
             )
         )
+    # Evolving synthetic observations need distinct availability timestamps;
+    # a scheduled-to-final update is not a rewrite of the earlier observation.
+    observed = SEASON_START + timedelta(weeks=completed_through_week)
+    games = [g.model_copy(update={
+        "retrieved_at": observed,
+        "source_snapshots": tuple(s.model_copy(update={"retrieved_at": observed}) for s in g.source_snapshots),
+    }) for g in games]
     store.write(games)
     _write_team(store, "BUF", games[0].source_snapshots)
     _write_team(store, "MIA", games[0].source_snapshots)

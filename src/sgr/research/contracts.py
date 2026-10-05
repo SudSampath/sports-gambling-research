@@ -101,7 +101,7 @@ def equivalent(a: ContractDefinition, b: ContractDefinition) -> bool:
     """Rule fingerprints can differ by venue; economic definitions cannot."""
     fields = (
         "game_id", "home_team_id", "away_team_id", "kickoff_at", "deadline_at",
-        "outcomes", "home_outcome_index", "outcome_type", "includes_overtime",
+        "outcome_type", "includes_overtime",
         "tie_payout", "cancellation",
     )
     return all(getattr(a, f) == getattr(b, f) for f in fields)

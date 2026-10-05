@@ -108,6 +108,10 @@ class ResearchStore:
         if not grouped:
             raise ValueError("At least one canonical record is required.")
         with duckdb.connect(str(self.database_path)) as connection:
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS canonical_history (entity_type VARCHAR, id VARCHAR, "
+                "retrieved_at TIMESTAMPTZ, payload_json JSON, PRIMARY KEY(entity_type,id,retrieved_at))"
+            )
             for entity_type, batch in grouped.items():
                 table = TABLES[entity_type]
                 connection.execute(
@@ -126,6 +130,20 @@ class ResearchStore:
                     )
                     for record in batch
                 ]
+                connection.execute(
+                    f"INSERT OR IGNORE INTO canonical_history SELECT entity_type,id,retrieved_at,payload_json FROM {table}"
+                )
+                for record in batch:
+                    old = connection.execute(
+                        "SELECT payload_json FROM canonical_history WHERE entity_type=? AND id=? AND retrieved_at=?",
+                        [record.entity_type, record.id, record.retrieved_at],
+                    ).fetchone()
+                    if old and json.loads(old[0]) != record.model_dump(mode="json"):
+                        raise ValueError("Immutable canonical observation was rewritten at the same retrieval time.")
+                connection.executemany(
+                    "INSERT OR IGNORE INTO canonical_history VALUES (?,?,?,?)",
+                    [(r.entity_type, r.id, r.retrieved_at, r.model_dump_json()) for r in batch],
+                )
                 connection.executemany(
                     f"INSERT OR REPLACE INTO {table} VALUES (?, ?, ?, ?, ?, ?)", rows
                 )
@@ -155,6 +173,28 @@ class ResearchStore:
             except duckdb.CatalogException:
                 return []
         return [load_canonical_record(row[0]) for row in rows]
+
+    def load_all_as_of(self, entity_type: str, cutoff: datetime, *, all_versions: bool = False) -> list[CanonicalRecord]:
+        """Preserve earlier observations even after latest canonical rows change."""
+        if not self.database_path.exists():
+            return []
+        with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            try:
+                selection = "" if all_versions else "QUALIFY row_number() OVER (PARTITION BY id ORDER BY retrieved_at DESC)=1"
+                rows = connection.execute(
+                    "SELECT payload_json FROM canonical_history WHERE entity_type=? AND retrieved_at<=? "
+                    + selection,
+                    [entity_type, cutoff],
+                ).fetchall()
+            except duckdb.CatalogException:
+                return [r for r in self.load_all(entity_type) if r.retrieved_at <= cutoff]
+        records = [load_canonical_record(row[0]) for row in rows]
+        known = {(r.id, r.retrieved_at) for r in records}
+        # Include eligible legacy records not yet observed by the history writer.
+        for record in self.load_all(entity_type):
+            if record.retrieved_at <= cutoff and (record.id, record.retrieved_at) not in known:
+                records.append(record)
+        return records
 
     def lineage_for_recommendation(self, recommendation_id: str) -> CanonicalLineage:
         recommendation = self.load("paper_recommendation", recommendation_id)
