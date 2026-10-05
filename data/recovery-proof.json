@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "runtime": "1.7.13",
+  "sdk": "1.0.5",
+  "stress": {
+    "completed_candidates": 10000,
+    "eligible_decisions": 50,
+    "paper_positions": 4,
+    "seconds": 30.22687300000689,
+    "candidates_per_second": 330.83144260399416,
+    "worker_peak_rss_kib": 272976,
+    "runtime_peak_rss_kib": 374400,
+    "requests": 0,
+    "invariants": true
+  },
+  "recovery": {
+    "completed_page_attempts": 1,
+    "completed_analysis_attempts": 1,
+    "fill_attempts": [
+      1,
+      1
+    ],
+    "fill_reconciliation_attempts": [
+      2,
+      2
+    ],
+    "offline_unchanged": true,
+    "replay_unchanged": true,
+    "invariants": true,
+    "settlement_once": true,
+    "synthetic_virtual_settlement_time": "2026-10-06T20:37:37.387806Z"
+  },
+  "pause_resume": {
+    "paused": true,
+    "checkpoint_stable": true,
+    "resumed_completed": true,
+    "invariants": true
+  }
+}
