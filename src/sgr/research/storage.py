@@ -21,6 +21,9 @@ from sgr.research.schemas import (
 
 
 TABLES = {
+    "polymarket_event": "polymarket_events",
+    "polymarket_market": "polymarket_markets",
+    "token_book_snapshot": "token_book_snapshots",
     "team": "teams",
     "game": "games",
     "team_strength_snapshot": "team_strength_snapshots",
